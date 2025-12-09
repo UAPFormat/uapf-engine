@@ -1,0 +1,31 @@
+{
+  "name": "uapf-engine",
+  "version": "1.0.0",
+  "description": "Reference execution engine for UAPF packages (HTTP API)",
+  "main": "index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/http/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/http/server.js",
+    "lint": "eslint src --ext .ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@uapf/uapf-typescript": "file:./vendor/uapf-typescript",
+    "body-parser": "^1.20.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.9.0",
+    "@typescript-eslint/eslint-plugin": "^8.49.0",
+    "@typescript-eslint/parser": "^8.49.0",
+    "eslint": "^9.14.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.6.3"
+  }
+}
