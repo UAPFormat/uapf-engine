@@ -5,20 +5,20 @@ import {
   EvaluateDecisionRequest,
   EvaluateDecisionResult,
 } from "./ExecutionEngine";
-import { PackageRegistry } from "../registry/packageRegistry";
+import { IUapfRegistry } from "../registry/IUapfRegistry";
 
 export class SimpleExecutionEngine implements IExecutionEngine {
-  constructor(private registry: PackageRegistry) {}
+  constructor(private registry: IUapfRegistry) {}
 
   async executeProcessOnce(
     req: ExecuteProcessRequest
   ): Promise<ExecuteProcessResult> {
-    const pkg = this.registry.getById(req.packageId);
+    const pkg = await this.registry.getPackage(req.packageId);
     if (!pkg) {
       throw new Error(`Unknown packageId: ${req.packageId}`);
     }
 
-    const processExists = pkg.manifest.processes?.some(
+    const processExists = pkg.processes?.some(
       (p) => p.id === req.processId || p.bpmnProcessId === req.processId
     );
     if (!processExists) {
@@ -26,6 +26,9 @@ export class SimpleExecutionEngine implements IExecutionEngine {
     }
 
     return {
+      packageId: pkg.packageId,
+      processId: req.processId,
+      mode: this.registry.mode(),
       applicationId: `APP-${Date.now()}`,
       status: "demo-only",
       outputs: {
@@ -39,18 +42,19 @@ export class SimpleExecutionEngine implements IExecutionEngine {
             "This is a stubbed execution result. Plug in a real BPMN/DMN engine here.",
         },
       ],
+      artifactRefs: pkg.artifacts,
     };
   }
 
   async evaluateDecision(
     req: EvaluateDecisionRequest
   ): Promise<EvaluateDecisionResult> {
-    const pkg = this.registry.getById(req.packageId);
+    const pkg = await this.registry.getPackage(req.packageId);
     if (!pkg) {
       throw new Error(`Unknown packageId: ${req.packageId}`);
     }
 
-    const decisionExists = pkg.manifest.decisions?.some(
+    const decisionExists = pkg.decisions?.some(
       (d) => d.id === req.decisionId || d.dmnDecisionId === req.decisionId
     );
     if (!decisionExists) {
@@ -58,6 +62,9 @@ export class SimpleExecutionEngine implements IExecutionEngine {
     }
 
     return {
+      packageId: pkg.packageId,
+      decisionId: req.decisionId,
+      mode: this.registry.mode(),
       outputs: {
         echoInput: req.input,
         packageId: pkg.packageId,
@@ -69,6 +76,7 @@ export class SimpleExecutionEngine implements IExecutionEngine {
             "This is a stubbed decision result. Plug in a real DMN engine here.",
         },
       ],
+      artifactRefs: pkg.artifacts,
     };
   }
 }

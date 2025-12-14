@@ -1,0 +1,26 @@
+### Health
+GET http://localhost:4000/health
+
+### List packages
+GET http://localhost:4000/uapf/packages
+
+### Package details
+GET http://localhost:4000/uapf/packages/sample-package
+
+### Download manifest
+GET http://localhost:4000/uapf/packages/sample-package/artifacts/manifest
+
+### Validate registry
+POST http://localhost:4000/uapf/validate
+Content-Type: application/json
+
+{}
+
+### Resolve resources
+POST http://localhost:4000/uapf/resolve-resources
+Content-Type: application/json
+
+{
+  "packageId": "sample-package",
+  "processId": "demo-process"
+}
