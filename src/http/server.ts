@@ -1,16 +1,28 @@
 import express from "express";
 import bodyParser from "body-parser";
-import { PORT } from "../config";
-import { PackageRegistry } from "../registry/packageRegistry";
+import {
+  PORT,
+  UAPF_SCHEMAS_DIR,
+  WORKSPACE_DIR,
+  resolveRegistryMode,
+} from "../config";
 import { SimpleExecutionEngine } from "../engine/SimpleExecutionEngine";
 import { createRoutes } from "./routes";
 import { logger } from "../utils/logger";
+import { DirectoryRegistry } from "../registry/DirectoryRegistry";
+import { WorkspaceRegistry } from "../registry/WorkspaceRegistry";
+import { UapfValidator } from "../registry/UapfValidator";
 
 async function main() {
   const app = express();
   app.use(bodyParser.json());
 
-  const registry = new PackageRegistry();
+  const validator = new UapfValidator(UAPF_SCHEMAS_DIR || undefined);
+  const registryMode = resolveRegistryMode();
+  const registry =
+    registryMode === "workspace"
+      ? new WorkspaceRegistry(WORKSPACE_DIR, validator)
+      : new DirectoryRegistry(validator);
   await registry.loadAll();
 
   const engine = new SimpleExecutionEngine(registry);

@@ -5,10 +5,14 @@ export interface ExecuteProcessRequest {
 }
 
 export interface ExecuteProcessResult {
+  packageId: string;
+  processId: string;
+  mode: "packages" | "workspace";
   applicationId?: string;
   status: string;
   outputs: unknown;
   explanations?: unknown[];
+  artifactRefs?: Array<{ kind: string; path: string }>;
 }
 
 export interface EvaluateDecisionRequest {
@@ -18,8 +22,12 @@ export interface EvaluateDecisionRequest {
 }
 
 export interface EvaluateDecisionResult {
+  packageId: string;
+  decisionId: string;
+  mode: "packages" | "workspace";
   outputs: unknown;
   explanations?: unknown[];
+  artifactRefs?: Array<{ kind: string; path: string }>;
 }
 
 export interface IExecutionEngine {
