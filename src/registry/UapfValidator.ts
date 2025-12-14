@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import Ajv, { type ErrorObject, type ValidateFunction } from "ajv";
+import Ajv, { type ErrorObject } from "ajv";
 import addFormats from "ajv-formats";
 import { LoadedPackage } from "./UapfLoader";
 
@@ -10,18 +10,19 @@ export interface ValidationIssue {
   path?: string;
 }
 
+type SchemaValidator = ReturnType<Ajv["compile"]>;
+
 export class UapfValidator {
   private ajv: Ajv;
-  private manifestValidator?: ValidateFunction;
-  private policiesValidator?: ValidateFunction;
-  private resourceBindingValidator?: ValidateFunction;
+  private manifestValidator?: SchemaValidator;
+  private policiesValidator?: SchemaValidator;
+  private resourceBindingValidator?: SchemaValidator;
   private startupWarnings: ValidationIssue[] = [];
 
   constructor(private schemasDir?: string) {
     this.ajv = new Ajv({
       allErrors: true,
       strict: false,
-      allowUnionTypes: true,
     });
     addFormats(this.ajv);
     this.loadValidators();
@@ -41,7 +42,7 @@ export class UapfValidator {
     this.resourceBindingValidator = this.loadSchema("resource-binding.schema.json");
   }
 
-  private loadSchema(fileName: string): ValidateFunction | undefined {
+  private loadSchema(fileName: string): SchemaValidator | undefined {
     const schemaPath = path.join(this.schemasDir as string, fileName);
     if (!fs.existsSync(schemaPath)) {
       this.startupWarnings.push({
@@ -67,7 +68,7 @@ export class UapfValidator {
   }
 
   private static formatErrors(
-    validator: ValidateFunction,
+    validator: SchemaValidator,
     basePath: string
   ): ValidationIssue[] {
     if (!validator.errors) return [];
