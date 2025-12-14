@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import Ajv, { ValidateFunction } from "ajv";
+import Ajv, { type ErrorObject, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import { LoadedPackage } from "./UapfLoader";
 
@@ -18,7 +18,11 @@ export class UapfValidator {
   private startupWarnings: ValidationIssue[] = [];
 
   constructor(private schemasDir?: string) {
-    this.ajv = new Ajv({ allErrors: true, strict: false });
+    this.ajv = new Ajv({
+      allErrors: true,
+      strict: false,
+      allowUnionTypes: true,
+    });
     addFormats(this.ajv);
     this.loadValidators();
   }
@@ -67,11 +71,15 @@ export class UapfValidator {
     basePath: string
   ): ValidationIssue[] {
     if (!validator.errors) return [];
-    return validator.errors.map((err) => ({
-      level: "error" as const,
-      message: `${err.instancePath || basePath} ${err.message ?? "invalid"}`.trim(),
-      path: basePath,
-    }));
+    return validator.errors.map((err: ErrorObject | any) => {
+      const path = (err as any).instancePath ?? (err as any).dataPath ?? basePath ?? "";
+
+      return {
+        level: "error" as const,
+        message: `${path} ${err.message ?? "invalid"}`.trim(),
+        path: basePath,
+      };
+    });
   }
 
   validateManifest(manifest: unknown): ValidationIssue[] {
