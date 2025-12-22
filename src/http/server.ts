@@ -21,6 +21,18 @@ import { DirectoryRegistry } from "../registry/DirectoryRegistry";
 import { WorkspaceRegistry } from "../registry/WorkspaceRegistry";
 import { UapfValidator } from "../registry/UapfValidator";
 
+async function moveUploadedFile(sourcePath: string, targetPath: string) {
+  try {
+    await fs.promises.rename(sourcePath, targetPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EXDEV") {
+      throw err;
+    }
+    await fs.promises.copyFile(sourcePath, targetPath);
+    await fs.promises.unlink(sourcePath);
+  }
+}
+
 function getEngineConfig(effectiveMode?: string) {
   return {
     service: "uapf-engine",
@@ -84,7 +96,7 @@ async function main() {
       }
 
       const targetPath = path.join(PACKAGES_DIR, originalName);
-      await fs.promises.rename(req.file.path, targetPath);
+      await moveUploadedFile(req.file.path, targetPath);
 
       res.json({
         status: "ok",
