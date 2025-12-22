@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>UAPF Engine Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f4f4f7;
+      color: #111827;
+    }
+
+    header {
+      background: #111827;
+      color: #f9fafb;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    header h1 {
+      font-size: 20px;
+      margin: 0;
+    }
+
+    header span {
+      font-size: 12px;
+      opacity: 0.8;
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 24px auto 40px;
+      padding: 0 16px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .card {
+      background: #ffffff;
+      border-radius: 10px;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+      padding: 16px 18px;
+    }
+
+    .card h2 {
+      font-size: 16px;
+      margin: 0 0 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card h3 {
+      font-size: 14px;
+      margin: 16px 0 6px;
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+
+    .meta-row span {
+      background: #f3f4f6;
+      border-radius: 999px;
+      padding: 4px 10px;
+    }
+
+    .upload-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+    }
+
+    input[type="file"] {
+      font-size: 13px;
+    }
+
+    button {
+      border-radius: 8px;
+      border: 1px solid #111827;
+      padding: 6px 12px;
+      font-size: 13px;
+      background: #111827;
+      color: #f9fafb;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: #ffffff;
+      color: #111827;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 6px 8px;
+      border-bottom: 1px solid #e5e7eb;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f9fafb;
+      font-weight: 600;
+    }
+
+    tbody tr:hover {
+      background: #f3f4f6;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+        "Courier New", monospace;
+      font-size: 12px;
+      background: #f3f4f6;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      padding: 2px 8px;
+      font-size: 11px;
+      background: #f9fafb;
+    }
+
+    .tag-level0 {
+      border-color: #0f766e;
+      color: #0f766e;
+    }
+    .tag-level1 {
+      border-color: #1d4ed8;
+      color: #1d4ed8;
+    }
+    .tag-level2 {
+      border-color: #7c3aed;
+      color: #7c3aed;
+    }
+    .tag-level3 {
+      border-color: #b45309;
+      color: #b45309;
+    }
+    .tag-level4 {
+      border-color: #be123c;
+      color: #be123c;
+    }
+
+    .pill {
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      background: #dcfce7;
+      color: #166534;
+      border: 1px solid #bbf7d0;
+    }
+
+    .pill.off {
+      background: #fee2e2;
+      color: #b91c1c;
+      border-color: #fecaca;
+    }
+
+    pre {
+      background: #0b1120;
+      color: #e5e7eb;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      overflow-x: auto;
+    }
+
+    .status {
+      margin-top: 8px;
+      font-size: 12px;
+      min-height: 18px;
+    }
+
+    .status.ok {
+      color: #166534;
+    }
+
+    .status.error {
+      color: #b91c1c;
+    }
+
+    a {
+      color: #1d4ed8;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 900px) {
+      .grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>UAPF Engine Dashboard</h1>
+      <span id="header-meta">Loading engine meta…</span>
+    </div>
+    <div>
+      <span id="header-mode"></span>
+    </div>
+  </header>
+
+  <main>
+    <div class="grid">
+      <section class="card">
+        <h2>Engine &amp; Settings</h2>
+        <div id="engine-meta"></div>
+
+        <h3>UAPF Directories</h3>
+        <div class="meta-row" id="engine-paths"></div>
+
+        <h3>MCP Connection</h3>
+        <div id="mcp-meta" style="font-size: 13px; margin-top: 4px;"></div>
+      </section>
+
+      <section class="card">
+        <h2>Upload .uapf Package</h2>
+        <p style="font-size: 13px; margin-top: 2px;">
+          Upload a UAPF package into the engine’s <code>PACKAGES_DIR</code>.
+          For the demo, use your Level&nbsp;4 package from the CV system.
+        </p>
+        <div class="upload-row">
+          <input id="uapf-file" type="file" accept=".uapf" />
+          <button id="upload-btn">Upload</button>
+        </div>
+        <div class="status" id="upload-status"></div>
+
+        <h3>Selected Package Manifest</h3>
+        <div
+          id="manifest-summary"
+          style="font-size: 12px; margin-bottom: 4px; color: #4b5563;"
+        >
+          Click <em>Manifest</em> on a package below to inspect its manifest.json (id, version,
+          level, interfaces, source).
+        </div>
+        <pre id="manifest-view" style="display: none;"></pre>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>Packages loaded into engine</h2>
+      <div id="packages-container">
+        <p style="font-size: 13px;">Loading packages…</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const headerMetaEl = document.getElementById("header-meta");
+    const headerModeEl = document.getElementById("header-mode");
+    const engineMetaEl = document.getElementById("engine-meta");
+    const enginePathsEl = document.getElementById("engine-paths");
+    const mcpMetaEl = document.getElementById("mcp-meta");
+    const packagesContainerEl = document.getElementById("packages-container");
+    const uploadInput = document.getElementById("uapf-file");
+    const uploadBtn = document.getElementById("upload-btn");
+    const uploadStatusEl = document.getElementById("upload-status");
+    const manifestViewEl = document.getElementById("manifest-view");
+    const manifestSummaryEl = document.getElementById("manifest-summary");
+
+    async function fetchJson(url, options) {
+      const res = await fetch(url, options);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} for ${url}`);
+      }
+      return await res.json();
+    }
+
+    function renderEngineMeta(meta, config) {
+      headerMetaEl.textContent = `${meta.service || "uapf-engine"} v${
+        meta.version || "?"
+      }`;
+      headerModeEl.textContent = `Mode: ${meta.mode || "packages"}`;
+
+      engineMetaEl.innerHTML = "";
+      const list = document.createElement("ul");
+      list.style.listStyle = "none";
+      list.style.padding = "0";
+      list.style.margin = "0";
+
+      const liVersion = document.createElement("li");
+      liVersion.textContent = `Version: ${meta.version || "unknown"}`;
+      list.appendChild(liVersion);
+
+      const liMode = document.createElement("li");
+      liMode.textContent = `Mode: ${meta.mode || "packages"}`;
+      list.appendChild(liMode);
+
+      const liService = document.createElement("li");
+      liService.textContent = `Service: ${meta.service || "uapf-engine"}`;
+      list.appendChild(liService);
+
+      engineMetaEl.appendChild(list);
+
+      enginePathsEl.innerHTML = "";
+
+      function addBadge(label, value) {
+        const span = document.createElement("span");
+        span.textContent = `${label}: ${value || "—"}`;
+        enginePathsEl.appendChild(span);
+      }
+
+      addBadge("PACKAGES_DIR", config.packagesDir);
+      addBadge("WORKSPACE_DIR", config.workspaceDir || "—");
+      addBadge("SCHEMAS_DIR", config.schemasDir || "—");
+      addBadge("CACHE_DIR", config.artifactCacheDir || "—");
+
+      const wsUrl = (config.mcp && config.mcp.websocketUrl) || "ws://localhost:7900";
+      mcpMetaEl.innerHTML = `
+        <div style="margin-bottom:4px;">WebSocket URL for MCP server:</div>
+        <code>${wsUrl}</code>
+        <div style="margin-top:4px; font-size:12px; color:#4b5563;">
+          Use this in your MCP client (e.g. ChatGPT, Neksus/UAPF MCP) as the agent transport.
+        </div>
+      `;
+    }
+
+    function levelTag(level) {
+      const span = document.createElement("span");
+      span.className = "tag tag-level" + (level ?? "x");
+      const label =
+        level === 0
+          ? "Tier 0 – enterprise"
+          : level === 1
+            ? "Tier 1 – domain"
+            : level === 2
+              ? "Tier 2 – process"
+              : level === 3
+                ? "Tier 3 – variant"
+                : level === 4
+                  ? "Tier 4 – task"
+                  : "Unknown level";
+      span.textContent = label;
+      return span;
+    }
+
+    function runnablePill(runnable) {
+      const span = document.createElement("span");
+      span.className = "pill" + (runnable ? "" : " off");
+      span.textContent = runnable ? "Runnable" : "Not runnable";
+      return span;
+    }
+
+    function renderPackages(listResponse) {
+      packagesContainerEl.innerHTML = "";
+
+      const packages = Array.isArray(listResponse)
+        ? listResponse
+        : listResponse?.packages || listResponse?.items || [];
+      if (!packages.length) {
+        const p = document.createElement("p");
+        p.style.fontSize = "13px";
+        p.textContent =
+          "No packages loaded. Point PACKAGES_DIR to your .uapf files or upload one above.";
+        packagesContainerEl.appendChild(p);
+        return;
+      }
+
+      const table = document.createElement("table");
+
+      const thead = document.createElement("thead");
+      thead.innerHTML = `
+        <tr>
+          <th>Package ID</th>
+          <th>Name / Version</th>
+          <th>Level / Status</th>
+          <th>Processes</th>
+          <th>Decisions</th>
+          <th>Source</th>
+          <th>Actions</th>
+        </tr>
+      `;
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+
+      packages.forEach((pkg) => {
+        const tr = document.createElement("tr");
+
+        const id = pkg.id || pkg.packageId || "unknown";
+
+        const tdId = document.createElement("td");
+        tdId.textContent = id;
+        tr.appendChild(tdId);
+
+        const tdName = document.createElement("td");
+        const name = pkg.name || "—";
+        const version = pkg.version || "—";
+        tdName.innerHTML = `<div>${name}</div><div style="color:#6b7280;font-size:12px;">v${version}</div>`;
+        tr.appendChild(tdName);
+
+        const tdLevel = document.createElement("td");
+        const level = pkg.level ?? pkg.tier ?? null;
+        const pillContainer = document.createElement("div");
+        if (level !== null && level !== undefined) {
+          pillContainer.appendChild(levelTag(level));
+        }
+        pillContainer.appendChild(document.createTextNode(" "));
+        pillContainer.appendChild(runnablePill(Boolean(pkg.runnable)));
+        tdLevel.appendChild(pillContainer);
+        tr.appendChild(tdLevel);
+
+        const tdProc = document.createElement("td");
+        const procList = pkg.processes || [];
+        tdProc.innerHTML = `<strong>${procList.length}</strong>`;
+        if (procList.length) {
+          const ul = document.createElement("ul");
+          ul.style.margin = "4px 0 0";
+          ul.style.paddingLeft = "18px";
+          procList.slice(0, 3).forEach((p) => {
+            const li = document.createElement("li");
+            li.textContent = p.id || p.ref || JSON.stringify(p);
+            ul.appendChild(li);
+          });
+          if (procList.length > 3) {
+            const liMore = document.createElement("li");
+            liMore.textContent = `… +${procList.length - 3} more`;
+            ul.appendChild(liMore);
+          }
+          tdProc.appendChild(ul);
+        }
+        tr.appendChild(tdProc);
+
+        const tdDec = document.createElement("td");
+        const decList = pkg.decisions || [];
+        tdDec.innerHTML = `<strong>${decList.length}</strong>`;
+        tr.appendChild(tdDec);
+
+        const tdSource = document.createElement("td");
+        tdSource.style.fontSize = "12px";
+        tdSource.textContent = "—";
+        tdSource.dataset.packageId = id;
+        tr.appendChild(tdSource);
+
+        const tdActions = document.createElement("td");
+        tdActions.style.whiteSpace = "nowrap";
+
+        const manifestBtn = document.createElement("button");
+        manifestBtn.className = "secondary";
+        manifestBtn.textContent = "Manifest";
+        manifestBtn.addEventListener("click", () => loadManifest(id));
+        tdActions.appendChild(manifestBtn);
+
+        tr.appendChild(tdActions);
+
+        tbody.appendChild(tr);
+      });
+
+      table.appendChild(tbody);
+      packagesContainerEl.appendChild(table);
+
+      packages.forEach((pkg) => {
+        const id = pkg.id || pkg.packageId || "unknown";
+        hydrateSourceMeta(id);
+      });
+    }
+
+    async function hydrateSourceMeta(packageId) {
+      const td = packagesContainerEl.querySelector(
+        `td[data-package-id="${CSS.escape(packageId)}"]`
+      );
+      if (!td) return;
+
+      try {
+        const summary = await fetchJson(`/uapf/packages/${encodeURIComponent(packageId)}`);
+        const source = summary.source || summary.sourceMeta || {};
+        const parts = [];
+
+        if (source.location) {
+          parts.push(`<span>Path: <code>${source.location}</code></span>`);
+        }
+
+        const meta = summary.manifest?.metadata || summary.metadata || {};
+        const srcMeta = meta.source || {};
+        const gitUrl =
+          srcMeta.repositoryUrl || srcMeta.gitUrl || srcMeta.repo || source.gitUrl;
+
+        if (gitUrl) {
+          parts.push(
+            `<span>Git: <a href="${gitUrl}" target="_blank" rel="noreferrer">${gitUrl}</a></span>`
+          );
+        }
+
+        if (!parts.length) {
+          td.textContent = "No source metadata";
+        } else {
+          td.innerHTML = parts.join("<br/>");
+        }
+      } catch (e) {
+        td.textContent = "Source: error fetching";
+      }
+    }
+
+    async function loadManifest(packageId) {
+      manifestSummaryEl.textContent = `Manifest for package: ${packageId}`;
+      manifestViewEl.style.display = "block";
+      manifestViewEl.textContent = "Loading manifest…";
+
+      try {
+        const res = await fetch(
+          `/uapf/packages/${encodeURIComponent(packageId)}/artifacts/manifest`
+        );
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const text = await res.text();
+
+        let pretty = text;
+        try {
+          const json = JSON.parse(text);
+          pretty = JSON.stringify(json, null, 2);
+        } catch {
+          // ignore
+        }
+
+        manifestViewEl.textContent = pretty;
+      } catch (e) {
+        manifestViewEl.textContent = `Failed to load manifest: ${e.message}`;
+      }
+    }
+
+    async function initDashboard() {
+      try {
+        const [meta, config] = await Promise.all([
+          fetchJson("/_/meta"),
+          fetchJson("/_/config").catch(() => ({
+            packagesDir: "./packages",
+            workspaceDir: null,
+            schemasDir: null,
+            artifactCacheDir: "./.cache/uapf-artifacts",
+            mcp: { websocketUrl: "ws://localhost:7900" }
+          }))
+        ]);
+        renderEngineMeta(meta, config);
+
+        const packages = await fetchJson("/uapf/packages");
+        renderPackages(packages);
+      } catch (e) {
+        packagesContainerEl.innerHTML = `<p style="color:#b91c1c;font-size:13px;">Error loading data: ${e.message}</p>`;
+      }
+    }
+
+    async function uploadPackage() {
+      uploadStatusEl.className = "status";
+      uploadStatusEl.textContent = "";
+      const file = uploadInput.files && uploadInput.files[0];
+      if (!file) {
+        uploadStatusEl.classList.add("error");
+        uploadStatusEl.textContent = "Please select a .uapf file first.";
+        return;
+      }
+      if (!file.name.endsWith(".uapf")) {
+        uploadStatusEl.classList.add("error");
+        uploadStatusEl.textContent = "Selected file must have .uapf extension.";
+        return;
+      }
+
+      uploadBtn.disabled = true;
+      uploadStatusEl.textContent = "Uploading…";
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await fetch("/uapf/upload", {
+          method: "POST",
+          body: formData
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text}`);
+        }
+        const body = await res.json();
+        uploadStatusEl.classList.add("ok");
+        uploadStatusEl.textContent =
+          body.message ||
+          "Upload complete. If the engine does not auto-rescan, restart it to load the new package.";
+
+        await initDashboard();
+      } catch (e) {
+        uploadStatusEl.classList.add("error");
+        uploadStatusEl.textContent = `Upload failed: ${e.message}`;
+      } finally {
+        uploadBtn.disabled = false;
+      }
+    }
+
+    uploadBtn.addEventListener("click", uploadPackage);
+
+    initDashboard();
+  </script>
+</body>
+</html>
