@@ -208,10 +208,20 @@ export class UapfLoader {
         continue;
       }
 
+      // Derive an artifact id from the filename so getArtifact(pkg, kind, id) works.
+      // dmn/size-classifier.dmn.xml -> size-classifier
+      // bpmn/incident-response.bpmn.xml -> incident-response
+      const base = path.basename(destPath);
+      const artifactId = base
+        .replace(/\.(bpmn|dmn|cmmn)\.xml$/i, "")
+        .replace(/\.(bpmn|dmn|cmmn)$/i, "")
+        .replace(/\.xml$/i, "");
+
       artifacts.push({
         kind,
         path: destPath,
         mediaType: mediaTypeForPath(kind, destPath),
+        id: artifactId,
       });
     }
 
