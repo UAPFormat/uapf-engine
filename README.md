@@ -1,87 +1,117 @@
 # uapf-engine
 
-Reference Node.js + TypeScript service that exposes a minimal HTTP API for loading and executing UAPF packages.
+Reference execution engine for UAPF packages. Implements the v0.1 [UAPF Integration Protocol](https://github.com/UAPFormat/UAPF-IP) REST binding plus a backwards-compatible stateless surface.
 
-## Features
+## What's in here
 
-- Loads `.uapf` packages from a configurable directory (default: `./packages`).
-- Supports workspace registry mode with a workspace index file and fallback scanning.
-- Handles `.uapf` JSON stubs and `.uapf` ZIP containers (manifest + BPMN/DMN/CMMN/docs/tests assets).
-- Validates packages via SSOT schemas when provided (best-effort when schemas are absent).
-- Exposes endpoints to list packages, fetch artifacts, resolve resources, validate packages, execute a process once, and evaluate a decision.
-- Designed to run on `localhost:4000` behind Apache/WAMP reverse proxy.
+- Real BPMN process execution (linear sequences, service tasks, business rule tasks). Custom minimal walker for v0.1; pluggable engine interface lets you swap in bpmn-engine or Camunda Zeebe later.
+- Real DMN decision-table evaluation with UNIQUE / FIRST / PRIORITY hit policies and basic comparison operators in input entries.
+- Session lifecycle (create, active, completed, failed) with in-memory persistence for v0.1.
+- Capability matchmaking: validates host manifest against package needs at session start; fails fast if anything is missing.
+- CloudEvents v1.0 audit emission with UAPF-IP extensions; events buffered per session and logged as structured JSON.
+- HTTP callback dispatcher (HostClient) that calls back into hosts via `POST /uapf/host/capability/{namespace}/{operation}`.
 
-## Project structure
+## What this is not yet
 
+- No durable session persistence — restart loses in-flight sessions. v0.2.
+- No user tasks (require host-side human interaction model — pairs with v0.2 task lifecycle).
+- No gateways (exclusive, parallel) — v0.2.
+- No DID-VC signing on requests yet — token-based auth placeholder. v0.2.
+- Custom minimal BPMN walker, not full bpmn-engine. Production deployments should swap in via the `IExecutionEngine` interface.
+
+## HTTP API
+
+### v0.1 UAPF-IP session surface
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/uapf/start-session` | Start a process execution against a host manifest |
+| `GET` | `/uapf/sessions` | List sessions |
+| `GET` | `/uapf/sessions/:id` | Inspect a session |
+| `GET` | `/uapf/sessions/:id/audit` | Get the audit chain for a session |
+
+### Legacy stateless surface (back-compat)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/uapf/execute-process` | Legacy one-shot process execution (now returns "use start-session") |
+| `POST` | `/uapf/evaluate-decision` | Stateless DMN evaluation |
+| `POST` | `/uapf/resolve-resources` | Resource resolution |
+| `POST` | `/uapf/validate` | Package validation |
+
+### Registry
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/uapf/packages` | List loaded packages |
+| `GET` | `/uapf/packages/:id` | Package summary |
+| `GET` | `/uapf/packages/:id/artifacts/:kind` | Fetch a specific artifact (bpmn, dmn, manifest, etc.) |
+
+## Starting a session
+
+```json
+POST /uapf/start-session
+{
+  "packageId": "com.example.sre.incident-response",
+  "processId": "incident-response",
+  "input": { "severity": "critical", "service": "checkout-api" },
+  "hostManifest": {
+    "hostDid": "did:web:host.example.com",
+    "hostBaseUrl": "http://host.example.com",
+    "profiles": ["uapf-ip-orchestrated"],
+    "capabilities": [
+      { "namespace": "data", "operation": "read", "version": 1 },
+      { "namespace": "ai", "operation": "classify", "version": 1 },
+      { "namespace": "task", "operation": "assign", "version": 1 },
+      { "namespace": "event", "operation": "emit", "version": 1 }
+    ]
+  }
+}
 ```
-uapf-engine/
-  src/
-    config/          # Environment configuration
-    engine/          # Execution engine interfaces and demo implementation
-    http/            # Express routes and server bootstrap
-    registry/        # Package registry for UAPF artifacts
-    types/           # Shared TypeScript types
-    utils/           # Logging utilities
-  vendor/uapf-typescript/ # Local stub for the UAPF SDK
-  test/             # Placeholder for future tests
-```
+
+The engine fetches the package's required capabilities, matches them against the host manifest, fails fast if any are missing, then walks the BPMN. Each service task triggers a `POST` to `hostBaseUrl/uapf/host/capability/{namespace}/{operation}` with the current variables and an audit-event reference. Each business rule task evaluates the named DMN decision in-process. Audit events stream as stdout JSON lines and accumulate on the session record.
 
 ## Getting started
 
-### Prerequisites
-- Node.js 20+
-- npm
-
-### Install dependencies
-
 ```bash
 npm install
+npm run build
+npm start
 ```
 
-### Configuration
-
-Environment variables (via `.env` or shell):
-
-- `PORT` – HTTP port (default: `4000`).
-- `UAPF_MODE` – registry mode: `packages`, `workspace`, or `auto` (default: `packages`).
-- `PACKAGES_DIR` – directory containing `.uapf` packages (default: `./packages`).
-- `WORKSPACE_DIR` – workspace root when `UAPF_MODE=workspace`/`auto` (required in workspace mode).
-- `WORKSPACE_INDEX_FILENAMES` – comma-separated list of workspace index candidates (default: `workspace.json,uapf.workspace.json,uapf-workspace.json`).
-- `UAPF_SCHEMAS_DIR` – optional path to SSOT schemas for validation.
-- `ARTIFACT_CACHE_DIR` – cache directory for extracted ZIP artifacts (default: `./.cache/uapf-artifacts`).
-
-### Development
+Or for development:
 
 ```bash
 npm run dev
 ```
 
-### Build
+The engine listens on `localhost:4000` by default. Set `PORT`, `UAPF_MODE`, `PACKAGES_DIR`, and `WORKSPACE_DIR` per the documented config.
 
-```bash
-npm run build
+## Project layout
+
+```
+uapf-engine/
+├── src/
+│   ├── config/           Environment configuration
+│   ├── engine/
+│   │   ├── ExecutionEngine.ts        Legacy interface
+│   │   ├── SimpleExecutionEngine.ts  Legacy stub
+│   │   ├── RealExecutionEngine.ts    v0.1 real implementation
+│   │   ├── BpmnWalker.ts             Custom minimal BPMN walker
+│   │   ├── DmnTableEvaluator.ts      DMN decision-table evaluator
+│   │   ├── HostClient.ts             HTTP callback client
+│   │   └── SessionManager.ts         In-memory sessions + audit emitter
+│   ├── http/
+│   │   ├── server.ts                 Express bootstrap
+│   │   └── routes.ts                 Endpoints
+│   ├── registry/                     Package loading and validation
+│   ├── types/
+│   │   ├── uapf.ts                   Package types
+│   │   └── uapf-ip.ts                Session, capability, audit types
+│   └── utils/
+└── public/                           Dashboard HTML
 ```
 
-### Start (from compiled output)
+## License
 
-```bash
-npm start
-```
-
-## HTTP API
-
-`GET /health` – health check.
-`GET /_/meta` – service metadata (`service`, `mode`, `version`).
-`GET /uapf/packages` – list loaded packages with processes and decisions.
-`GET /uapf/packages/:packageId` – package summary and source metadata.
-`GET /uapf/packages/:packageId/artifacts/:kind?id=...` – download manifest/BPMN/DMN/CMMN/docs/tests artifacts.
-`POST /uapf/execute-process` – body: `{ packageId, processId, input }` (returns mode, artifact refs, and stubbed outputs).
-`POST /uapf/evaluate-decision` – body: `{ packageId, decisionId, input }` (returns mode, artifact refs, and stubbed outputs).
-`POST /uapf/resolve-resources` – body: `{ packageId, processId?, taskId? }` to retrieve resource bindings.
-`POST /uapf/validate` – body: `{ packageId? }` to validate a package or the entire registry/workspace.
-
-Responses are stubbed for now and echo the provided inputs along with contextual metadata.
-
-## Notes on the UAPF SDK stub
-
-The repository bundles a minimal `@uapf/uapf-typescript` stub under `vendor/uapf-typescript` so the project works without the published SDK. The stub reads `.uapf` files as JSON documents containing a `manifest` object. Replace this dependency with the official SDK when available.
+MIT.

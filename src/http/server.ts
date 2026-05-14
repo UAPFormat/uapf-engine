@@ -14,7 +14,8 @@ import {
   WORKSPACE_DIR,
   resolveRegistryMode,
 } from "../config";
-import { SimpleExecutionEngine } from "../engine/SimpleExecutionEngine";
+import { RealExecutionEngine } from "../engine/RealExecutionEngine";
+import { SessionManager, AuditEmitter } from "../engine/SessionManager";
 import { createRoutes } from "./routes";
 import { logger } from "../utils/logger";
 import { DirectoryRegistry } from "../registry/DirectoryRegistry";
@@ -60,7 +61,9 @@ async function main() {
       : new DirectoryRegistry(validator);
   await registry.loadAll();
 
-  const engine = new SimpleExecutionEngine(registry);
+  const sessionManager = new SessionManager();
+  const audit = new AuditEmitter(sessionManager);
+  const engine = new RealExecutionEngine(registry, sessionManager, audit);
 
   const uploadTmpDir =
     process.env.UPLOAD_TMP_DIR || path.join(os.tmpdir(), "uapf-upload");
@@ -122,7 +125,7 @@ async function main() {
     res.redirect("/ui/uapf-dashboard.html");
   });
 
-  app.use("/", createRoutes(registry, engine));
+  app.use("/", createRoutes(registry, engine, sessionManager));
 
   app.listen(PORT, "0.0.0.0", () => {
     logger.info(`uapf-engine listening on port ${PORT}`);
