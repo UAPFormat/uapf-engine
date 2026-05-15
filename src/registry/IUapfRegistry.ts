@@ -56,4 +56,12 @@ export interface IUapfRegistry {
     ok: boolean;
     issues: Array<{ level: "error" | "warn"; message: string; path?: string }>;
   }>;
+  /** Reload all packages from disk. Returns the set of packages loaded. */
+  reloadAll?(): Promise<PackageSummary[]>;
+  /** Fetch a .uapf or repository zip from a URL, write to PACKAGES_DIR, reload. */
+  installFromUrl?(opts: {
+    sourceUrl: string;
+    packageId?: string;
+    filename?: string;
+  }): Promise<{ filename: string; packageId: string; version?: string }>;
 }
