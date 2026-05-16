@@ -11,6 +11,7 @@
 //   - SessionManager  tracks session state
 //   - AuditEmitter    emits CloudEvents audit records
 
+import * as crypto from "crypto";
 import {
   IExecutionEngine,
   ExecuteProcessRequest,
@@ -18,7 +19,7 @@ import {
   EvaluateDecisionRequest,
   EvaluateDecisionResult,
 } from "./ExecutionEngine";
-import { IUapfRegistry } from "../registry/IUapfRegistry";
+import { IUapfRegistry, PackageSummary } from "../registry/IUapfRegistry";
 import { BpmnWalker, BpmnNode, StepHandler } from "./BpmnWalker";
 import { DmnTableEvaluator } from "./DmnTableEvaluator";
 import { HostClient } from "./HostClient";
@@ -109,6 +110,17 @@ export class RealExecutionEngine implements IExecutionEngine {
     const needs = this.extractCapabilityNeeds(pkg as unknown as Record<string, unknown>);
     const bindings = this.matchCapabilities(needs, req.hostManifest);
 
+    // G7: resolve guardrails. The package ships them under resources/guardrails.*
+    // (parsed by the loader into pkg.guardrails). guardrailsRef MAY point at them
+    // via a package:// URI; if it does, it must reference THIS package's file.
+    const guardrails = this.resolveGuardrails(pkg, req.guardrailsRef);
+    const guardrailsHash = guardrails
+      ? crypto
+          .createHash("sha256")
+          .update(JSON.stringify(guardrails))
+          .digest("hex")
+      : undefined;
+
     const session = this.sessions.create({
       packageId: pkg.packageId,
       packageVersion: req.packageVersion,
@@ -116,6 +128,7 @@ export class RealExecutionEngine implements IExecutionEngine {
       input: req.input,
       hostManifest: req.hostManifest,
       capabilityBindings: bindings,
+      guardrails,
     });
 
     this.audit.emit({
@@ -126,10 +139,12 @@ export class RealExecutionEngine implements IExecutionEngine {
       data: {
         processId: req.processId,
         hostDid: req.hostManifest.hostDid,
+        guardrailsApplied: !!guardrails,
         capabilityBindings: Object.fromEntries(
           Object.entries(bindings).map(([k, v]) => [k, formatCapabilityRef(v)])
         ),
       },
+      guardrailsHash,
       profile: req.hostManifest.profiles?.[0],
     });
 
@@ -267,6 +282,33 @@ export class RealExecutionEngine implements IExecutionEngine {
   }
 
   // --- Helpers ---------------------------------------------------------
+
+  // G7: resolve the guardrails snapshot for a session.
+  //
+  // The loader parses resources/guardrails.{yaml,yml,json} into pkg.guardrails.
+  // A start-session request MAY also pass guardrailsRef as a package:// URI;
+  // per the UAPF-IP REST binding that URI references a file *inside the same
+  // package*, so it is validated for consistency but the parsed file is the
+  // source of truth. A guardrailsRef pointing at a different package is
+  // rejected — a session must not run under another package's policy.
+  private resolveGuardrails(
+    pkg: PackageSummary,
+    guardrailsRef?: string
+  ): Record<string, unknown> | undefined {
+    if (guardrailsRef && guardrailsRef.startsWith("package://")) {
+      // package://<id>@<version>/resources/guardrails.yaml
+      const body = guardrailsRef.slice("package://".length);
+      const refId = body.split("/")[0].split("@")[0];
+      if (refId && refId !== pkg.packageId) {
+        throw new Error(
+          `guardrailsRef points at package '${refId}' but the session package ` +
+            `is '${pkg.packageId}'. Cross-package guardrails are not permitted.`
+        );
+      }
+    }
+    // pkg.guardrails is the parsed resources/guardrails.* file (or undefined).
+    return pkg.guardrails;
+  }
 
   private extractCapabilityNeeds(pkg: Record<string, unknown>): CapabilityRef[] {
     // Capability needs may live on the package record under different keys

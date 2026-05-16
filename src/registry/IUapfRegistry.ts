@@ -20,6 +20,7 @@ export interface PackageSummary {
   decisions?: Array<{ id: string; label?: string; dmnDecisionId?: string }>;
   artifacts?: ArtifactRef[];
   requiredClaims?: string[];
+  guardrails?: Record<string, unknown>;  // G7: package guardrails snapshot
   source: { mode: RegistryMode; location: string };
 }
 

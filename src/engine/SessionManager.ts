@@ -77,6 +77,20 @@ export class SessionManager {
     }
   }
 
+  // G2: abort a session before completion. Idempotent for already-finished
+  // sessions — a completed/failed/aborted session is left untouched.
+  abort(sessionId: string, reason?: string): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s) return false;
+    if (s.state === "completed" || s.state === "failed" || s.state === "aborted") {
+      return false;
+    }
+    s.state = "aborted";
+    s.completedAt = new Date().toISOString();
+    s.errorMessage = reason ? `aborted: ${reason}` : "aborted by host";
+    return true;
+  }
+
   appendAudit(sessionId: string, event: AuditEvent): void {
     const s = this.sessions.get(sessionId);
     if (s) s.auditChain.push(event);
@@ -97,6 +111,7 @@ export class AuditEmitter {
     type: string;
     data?: unknown;
     profile?: string;
+    guardrailsHash?: string;   // G7: content hash of the active guardrails snapshot
   }): AuditEvent {
     const event: AuditEvent = {
       specversion: "1.0",
@@ -110,6 +125,7 @@ export class AuditEmitter {
       uapfpackageid: args.packageId,
       uapfpackageversion: args.packageVersion,
       uapfstepid: args.stepId,
+      uapfguardrailshash: args.guardrailsHash,
       uapfprofile: args.profile,
     };
     this.sessions.appendAudit(args.sessionId, event);

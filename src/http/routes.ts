@@ -180,6 +180,30 @@ export function createRoutes(
     res.json(session.auditChain);
   });
 
+  // UAPF-IP v0.1 — abort a running session (G2)
+  router.post("/uapf/sessions/:sessionId/abort", (req, res) => {
+    if (!sessions) {
+      res.status(501).json({ error: "session_surface_not_wired" });
+      return;
+    }
+    const session = sessions.get(req.params.sessionId);
+    if (!session) {
+      res.status(404).json({ error: "session_not_found" });
+      return;
+    }
+    const reason =
+      req.body && typeof req.body.reason === "string" ? req.body.reason : undefined;
+    const aborted = sessions.abort(req.params.sessionId, reason);
+    if (!aborted) {
+      res.status(409).json({
+        error: "session_not_abortable",
+        detail: `Session is in terminal state '${session.state}'.`,
+      });
+      return;
+    }
+    res.json({ sessionId: session.sessionId, state: "aborted" });
+  });
+
   // ─── Admin: package management ────────────────────────────────────
   //
   // These endpoints let an external host (typically OpenDMS) sync packages

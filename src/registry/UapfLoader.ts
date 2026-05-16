@@ -18,6 +18,7 @@ export interface LoadedPackage {
   artifacts: ArtifactRef[];
   policies?: any;
   resources?: any;
+  guardrails?: any;            // G7: parsed resources/guardrails.* if present
   warnings: string[];
   sourceMode?: RegistryMode;
 }
@@ -25,6 +26,13 @@ export interface LoadedPackage {
 const MANIFEST_FILES = ["manifest.json", "uapf.json", "uapf.manifest.json"];
 const RESOURCE_FILES = ["resources.json", "resources.yaml", "resources.yml"];
 const POLICY_FILES = ["policies.json", "policies.yaml", "policies.yml"];
+// G7: guardrails travel inside the package under resources/. The runtime must
+// resolve them into the session so they are enforced at every capability call.
+const GUARDRAILS_FILES = [
+  "resources/guardrails.yaml",
+  "resources/guardrails.yml",
+  "resources/guardrails.json",
+];
 
 function sanitizeEntryName(entryName: string): string {
   const normalized = entryName.replace(/\\/g, "/").replace(/^\/+/g, "");
@@ -156,12 +164,26 @@ export class UapfLoader {
 
     let policies: any = undefined;
     let resources: any = undefined;
+    let guardrails: any = undefined;  // G7
 
     const entries = zip.getEntries();
     for (const entry of entries) {
       if (entry.isDirectory) continue;
       const safeRelPath = sanitizeEntryName(entry.entryName);
       const lowerName = safeRelPath.toLowerCase();
+      const posixLower = lowerName.split(path.sep).join("/");
+
+      // G7: capture resources/guardrails.{yaml,yml,json} for session enforcement.
+      if (GUARDRAILS_FILES.includes(posixLower)) {
+        try {
+          guardrails = posixLower.endsWith(".json")
+            ? readJsonBuffer(entry.getData())
+            : readYamlBuffer(entry.getData());
+        } catch (err) {
+          warnings.push(`Failed to parse guardrails: ${(err as Error).message}`);
+        }
+        continue;
+      }
 
       const kind: ArtifactKind | null = (() => {
         if (MANIFEST_FILES.some((m) => lowerName.endsWith(m))) return "manifest";
@@ -256,6 +278,7 @@ export class UapfLoader {
       artifacts,
       resources,
       policies,
+      guardrails,
       warnings,
     };
   }
