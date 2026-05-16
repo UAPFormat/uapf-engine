@@ -8,6 +8,7 @@
 // VeriDocs Register for signed durable storage.
 
 import { v4 as uuidv4 } from "uuid";
+import fetch from "node-fetch";
 import {
   SessionRecord,
   SessionState,
@@ -131,6 +132,32 @@ export class AuditEmitter {
     this.sessions.appendAudit(args.sessionId, event);
     // Structured log line — visible in container logs, friendly for jq.
     process.stdout.write(JSON.stringify({ audit: event }) + "\n");
+    // G3: deliver the event to the host's /uapf/host/audit endpoint.
+    // Fire-and-forget — audit delivery MUST NOT block process execution.
+    this.deliverToHost(args.sessionId, event);
     return event;
+  }
+
+  // G3: POST a CloudEvent to the session host's audit endpoint.
+  // Per the UAPF-IP REST binding, default audit delivery is
+  // POST {hostBaseUrl}/uapf/host/audit. Hosts that prefer webhook/queue/polled
+  // delivery are a v0.2 concern; v0.1 uses the default POST.
+  private deliverToHost(sessionId: string, event: AuditEvent): void {
+    const session = this.sessions.get(sessionId);
+    const hostBaseUrl = session?.hostManifest?.hostBaseUrl;
+    if (!hostBaseUrl) return; // no host (e.g. legacy stateless call) — skip
+    const url = `${hostBaseUrl.replace(/\/$/, "")}/uapf/host/audit`;
+    void fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/cloudevents+json" },
+      body: JSON.stringify(event),
+    }).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stdout.write(
+        JSON.stringify({
+          auditDeliveryError: { sessionId, eventId: event.id, url, error: msg },
+        }) + "\n"
+      );
+    });
   }
 }
