@@ -133,43 +133,109 @@ export class UapfLoader {
       )
     );
 
-    let manifest: any = null;
-    let manifestPath = "";
+    const entries = zip.getEntries();
+    const toPosix = (s: string): string =>
+      s.replace(/\\/g, "/").replace(/^\/+/, "");
 
-    for (const candidate of MANIFEST_FILES) {
-      const entry = zip.getEntry(candidate) || zip.getEntry(`/${candidate}`);
-      if (entry) {
-        try {
-          manifest = readJsonBuffer(entry.getData());
-          const safePath = sanitizeEntryName(candidate);
-          manifestPath = path.join(cacheBase, safePath);
-          await fs.promises.mkdir(path.dirname(manifestPath), { recursive: true });
-          await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-          artifacts.push({
-            kind: "manifest",
-            path: manifestPath,
-            mediaType: "application/json",
-            id: manifest?.id,
-          });
-        } catch (err) {
-          warnings.push(`Failed to parse manifest ${candidate}: ${(err as Error).message}`);
+    // -- Locate the package root --------------------------------------------
+    // A UAPF package is defined by the location of its manifest, not by the
+    // archive root. The manifest (uapf.yaml, kind: uapf.package) may live in a
+    // subdirectory of a multi-level workspace repo (e.g.
+    // processes/L4/<pkg>/uapf.yaml). Find it and treat its directory as the
+    // package root; cornerstone folders (bpmn/, dmn/, cmmn/, docs/) resolve
+    // relative to that root. Falls back to a legacy JSON manifest at the
+    // archive root for backward compatibility.
+    let manifest: any = null;
+    let rootPrefix = "";
+
+    const yamlManifestEntries = entries
+      .filter(
+        (e) =>
+          !e.isDirectory && /(^|\/)uapf\.ya?ml$/i.test(toPosix(e.entryName))
+      )
+      .sort(
+        (a, b) =>
+          toPosix(a.entryName).split("/").length -
+          toPosix(b.entryName).split("/").length
+      );
+    for (const e of yamlManifestEntries) {
+      try {
+        const doc: any = readYamlBuffer(e.getData());
+        if (doc && doc.kind === "uapf.package") {
+          manifest = doc;
+          const posix = toPosix(e.entryName);
+          const slash = posix.lastIndexOf("/");
+          rootPrefix = slash >= 0 ? posix.slice(0, slash + 1) : "";
+          if (rootPrefix) {
+            warnings.push(
+              `Package root detected at '${rootPrefix}' (nested package)`
+            );
+          }
+          break;
         }
-        break;
+      } catch (err) {
+        warnings.push(
+          `Failed to parse ${e.entryName}: ${(err as Error).message}`
+        );
+      }
+    }
+
+    // Legacy fallback: JSON manifest at the archive root.
+    if (!manifest) {
+      for (const candidate of MANIFEST_FILES) {
+        const entry = zip.getEntry(candidate) || zip.getEntry(`/${candidate}`);
+        if (entry) {
+          try {
+            manifest = readJsonBuffer(entry.getData());
+          } catch (err) {
+            warnings.push(
+              `Failed to parse manifest ${candidate}: ${(err as Error).message}`
+            );
+          }
+          break;
+        }
       }
     }
 
     if (!manifest) {
-      warnings.push("No manifest found in archive; attempting best-effort load");
+      warnings.push(
+        "No manifest found in archive; attempting best-effort load"
+      );
     }
 
+    // Persist the manifest as a JSON artifact so getArtifact(pkg,'manifest')
+    // resolves regardless of the manifest's original format/location.
+    const manifestPath = path.join(cacheBase, "manifest.json");
+    await fs.promises.mkdir(path.dirname(manifestPath), { recursive: true });
+    await fs.promises.writeFile(
+      manifestPath,
+      JSON.stringify(manifest ?? {}, null, 2)
+    );
+    artifacts.push({
+      kind: "manifest",
+      path: manifestPath,
+      mediaType: "application/json",
+      id: manifest?.id,
+    });
+
+    // -- Artifact discovery, resolved relative to the package root ----------
     let policies: any = undefined;
     let resources: any = undefined;
-    let guardrails: any = undefined;  // G7
+    let guardrails: any = undefined; // G7
 
-    const entries = zip.getEntries();
     for (const entry of entries) {
       if (entry.isDirectory) continue;
-      const safeRelPath = sanitizeEntryName(entry.entryName);
+
+      // Rebase the entry path onto the package root; skip anything outside it.
+      let rel = toPosix(entry.entryName);
+      if (rootPrefix) {
+        if (!rel.startsWith(rootPrefix)) continue;
+        rel = rel.slice(rootPrefix.length);
+      }
+      if (!rel) continue;
+
+      const safeRelPath = sanitizeEntryName(rel);
+      if (!safeRelPath) continue;
       const lowerName = safeRelPath.toLowerCase();
       const posixLower = lowerName.split(path.sep).join("/");
 
@@ -180,7 +246,9 @@ export class UapfLoader {
             ? readJsonBuffer(entry.getData())
             : readYamlBuffer(entry.getData());
         } catch (err) {
-          warnings.push(`Failed to parse guardrails: ${(err as Error).message}`);
+          warnings.push(
+            `Failed to parse guardrails: ${(err as Error).message}`
+          );
         }
         continue;
       }
@@ -226,13 +294,11 @@ export class UapfLoader {
       }
 
       if (kind === "manifest") {
-        // Manifest already handled above; avoid duplicate entries
+        // Manifest already handled above; avoid duplicate entries.
         continue;
       }
 
-      // Derive an artifact id from the filename so getArtifact(pkg, kind, id) works.
-      // dmn/size-classifier.dmn.xml -> size-classifier
-      // bpmn/incident-response.bpmn.xml -> incident-response
+      // Derive an artifact id from the filename so getArtifact(pkg,kind,id) works.
       const base = path.basename(destPath);
       const artifactId = base
         .replace(/\.(bpmn|dmn|cmmn)\.xml$/i, "")
@@ -247,28 +313,8 @@ export class UapfLoader {
       });
     }
 
-    if (!manifest && manifestPath) {
-      try {
-        const parsed = await fs.promises.readFile(manifestPath, "utf-8");
-        manifest = JSON.parse(parsed);
-      } catch (err) {
-        warnings.push(`Failed to read extracted manifest: ${(err as Error).message}`);
-      }
-    }
-
-    const packageId = manifest?.id || path.basename(filePath, path.extname(filePath));
-
-    if (!artifacts.find((a) => a.kind === "manifest")) {
-      manifestPath = path.join(cacheBase, "manifest.json");
-      await fs.promises.writeFile(manifestPath, JSON.stringify(manifest ?? {}, null, 2));
-      artifacts.push({
-        kind: "manifest",
-        path: manifestPath,
-        mediaType: "application/json",
-        id: manifest?.id,
-      });
-      warnings.push("Injected manifest placeholder due to missing manifest entry");
-    }
+    const packageId =
+      manifest?.id || path.basename(filePath, path.extname(filePath));
 
     return {
       manifest: manifest ?? {},

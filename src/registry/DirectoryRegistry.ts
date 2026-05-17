@@ -201,12 +201,32 @@ export class DirectoryRegistry implements IUapfRegistry {
     // Load just this one package and merge into the registry so we don't lose
     // any other packages that may have been side-loaded.
     const loaded = await UapfLoader.loadFromFile(target);
+
+    // If the filename was auto-generated (no packageId/filename supplied), the
+    // real package id is only known after load. Rename the persisted .uapf to
+    // <packageId>.uapf so subsequent re-syncs overwrite deterministically
+    // instead of accumulating package-<timestamp>.uapf files.
+    let finalFilename = filename;
+    if (
+      !opts.filename &&
+      !opts.packageId &&
+      loaded.packageId &&
+      !filename.startsWith(`${loaded.packageId}.`)
+    ) {
+      finalFilename = `${loaded.packageId}.uapf`;
+      const finalTarget = path.join(PACKAGES_DIR, finalFilename);
+      if (finalTarget !== target) {
+        await fs.promises.rename(target, finalTarget);
+        loaded.sourcePath = finalTarget;
+      }
+    }
+
     this.packages.set(loaded.packageId, loaded);
     logger.info(
       `installFromUrl: registered ${loaded.packageId}@${loaded.version ?? ""}`
     );
     return {
-      filename,
+      filename: finalFilename,
       packageId: loaded.packageId,
       version: loaded.version,
     };
