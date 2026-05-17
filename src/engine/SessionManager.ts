@@ -147,10 +147,20 @@ export class AuditEmitter {
     const hostBaseUrl = session?.hostManifest?.hostBaseUrl;
     if (!hostBaseUrl) return; // no host (e.g. legacy stateless call) — skip
     const url = `${hostBaseUrl.replace(/\/$/, "")}/uapf/host/audit`;
+    // Surface the documentId from the session input into the delivered event\'s
+    // data so the host can correlate / stream audit events against the right
+    // business object in real time. The in-memory audit + stdout log keep the
+    // raw event unchanged.
+    const sessInput = (session as unknown as { input?: Record<string, unknown> } | undefined)?.input;
+    const docId = sessInput?.documentId;
+    const payload =
+      docId != null
+        ? { ...event, data: { ...((event.data as Record<string, unknown>) ?? {}), documentId: docId } }
+        : event;
     void fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/cloudevents+json" },
-      body: JSON.stringify(event),
+      body: JSON.stringify(payload),
     }).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       process.stdout.write(
