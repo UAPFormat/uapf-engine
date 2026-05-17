@@ -201,6 +201,7 @@ export class RealExecutionEngine implements IExecutionEngine {
           capability: cap,
           input: vars,
           guardrails: session.guardrails,
+          schemaRef: node.schemaRef,
         });
 
         this.audit.emit({

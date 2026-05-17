@@ -99,6 +99,7 @@ export interface CapabilityInvocation {
   capability: CapabilityRef;
   input: unknown;
   guardrails?: Record<string, unknown>;
+  schemaRef?: string;   // uapf:schemaRef of the invoking BPMN task (I/O contract)
 }
 
 export interface CapabilityResult {

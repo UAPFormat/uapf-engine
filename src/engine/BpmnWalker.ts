@@ -33,6 +33,7 @@ export interface BpmnNode {
   type: BpmnNodeType;
   capability?: string;   // uapf:capability attribute
   decision?: string;     // uapf:decision attribute
+  schemaRef?: string;    // uapf:schemaRef attribute (task I/O contract)
 }
 
 export interface BpmnFlow {
@@ -117,6 +118,7 @@ export class BpmnWalker {
           type,
           capability: (it["@_capability"] as string) || undefined,
           decision: (it["@_decision"] as string) || undefined,
+          schemaRef: (it["@_schemaRef"] as string) || undefined,
         });
       }
     }
