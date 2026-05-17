@@ -5,6 +5,7 @@
 // - Hit policies: UNIQUE, FIRST, PRIORITY
 // - Input expressions: strings ("foo"), numbers (15), booleans (true), dash (-) for any
 // - Comparison operators in input entries: ==, !=, >, >=, <, <=
+// - FEEL intervals [a..b] (a..b) [a..b) etc.; comma-separated value lists
 // - Output expressions: literals only
 //
 // What it does NOT do:
@@ -212,6 +213,42 @@ export class DmnTableEvaluator {
   private matchEntry(entry: unknown, value: unknown, typeRef: string): boolean {
     const trimmed = String(entry).trim();
     if (trimmed === "-" || trimmed === "") return true; // wildcard
+
+    // FEEL interval / range: [a..b], (a..b), [a..b), ]a..b[ etc.
+    // '[' is an inclusive endpoint; '(' and ']' (outward-facing) are exclusive.
+    const rangeMatch = trimmed.match(
+      /^([[\](])\s*(.+?)\s*\.\.\s*(.+?)\s*([[\])])$/
+    );
+    if (rangeMatch) {
+      const lo = Number(this.parseLiteral(rangeMatch[2]));
+      const hi = Number(this.parseLiteral(rangeMatch[3]));
+      const v = Number(value);
+      if (Number.isNaN(lo) || Number.isNaN(hi) || Number.isNaN(v)) return false;
+      const loOk = rangeMatch[1] === "[" ? v >= lo : v > lo;
+      const hiOk = rangeMatch[4] === "]" ? v <= hi : v < hi;
+      return loOk && hiOk;
+    }
+
+    // Comma-separated list of literals/intervals: match if value matches any.
+    if (trimmed.includes(",")) {
+      const parts: string[] = [];
+      let depth = 0;
+      let buf = "";
+      for (const ch of trimmed) {
+        if (ch === "[" || ch === "(") depth++;
+        else if (ch === "]" || ch === ")") depth--;
+        if (ch === "," && depth <= 0) {
+          parts.push(buf);
+          buf = "";
+        } else {
+          buf += ch;
+        }
+      }
+      parts.push(buf);
+      if (parts.length > 1) {
+        return parts.some((p) => this.matchEntry(p, value, typeRef));
+      }
+    }
 
     // Numeric comparisons: >, >=, <, <=
     const cmpMatch = trimmed.match(/^(<=|>=|<|>|!=|==)\s*(.+)$/);
