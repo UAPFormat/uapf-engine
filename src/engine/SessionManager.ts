@@ -153,9 +153,13 @@ export class AuditEmitter {
     // raw event unchanged.
     const sessInput = (session as unknown as { input?: Record<string, unknown> } | undefined)?.input;
     const docId = sessInput?.documentId;
+    const correlationId = sessInput?.correlationId;
+    const extra: Record<string, unknown> = {};
+    if (docId != null) extra.documentId = docId;
+    if (correlationId != null) extra.correlationId = correlationId;
     const payload =
-      docId != null
-        ? { ...event, data: { ...((event.data as Record<string, unknown>) ?? {}), documentId: docId } }
+      Object.keys(extra).length > 0
+        ? { ...event, data: { ...((event.data as Record<string, unknown>) ?? {}), ...extra } }
         : event;
     void fetch(url, {
       method: "POST",
