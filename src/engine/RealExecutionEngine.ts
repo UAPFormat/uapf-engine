@@ -249,6 +249,48 @@ export class RealExecutionEngine implements IExecutionEngine {
 
         return (result.result ?? {}) as Record<string, unknown>;
       },
+
+      onUserTask: async (node: BpmnNode, vars) => {
+        // A user task is dispatched to the host's task.* capability. The
+        // host owns the human-interaction lifecycle (queue, claim, complete)
+        // and returns the human's decision; UAPF-IP reserves the `task`
+        // namespace for exactly this (Orchestrated Process profile). The
+        // node MAY name an explicit capability via uapf:capability; if it
+        // does not, task.request@1 is the default.
+        const cap: CapabilityRef = node.capability
+          ? parseCapabilityRef(node.capability)
+          : { namespace: "task", operation: "request", version: 1 };
+
+        this.audit.emit({
+          sessionId: session.sessionId,
+          packageId: pkg.packageId,
+          stepId: node.id,
+          type: "dev.uapf.usertask.dispatched",
+          data: { capability: formatCapabilityRef(cap), nodeName: node.name },
+        });
+
+        const result = await hostClient.invoke({
+          sessionId: session.sessionId,
+          stepId: node.id,
+          capability: cap,
+          input: vars,
+          guardrails: session.guardrails,
+          schemaRef: node.schemaRef,
+        });
+
+        this.audit.emit({
+          sessionId: session.sessionId,
+          packageId: pkg.packageId,
+          stepId: node.id,
+          type: "dev.uapf.usertask.completed",
+          data: { capability: formatCapabilityRef(cap), output: result.output },
+        });
+
+        if (result.output && typeof result.output === "object") {
+          return result.output as Record<string, unknown>;
+        }
+        return { [`${cap.namespace}_${cap.operation}_result`]: result.output };
+      },
     };
 
     try {
