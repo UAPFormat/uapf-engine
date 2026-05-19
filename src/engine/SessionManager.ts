@@ -1,12 +1,15 @@
-// SessionManager: in-memory storage for active and completed sessions.
+// SessionManager: storage for active and completed sessions.
 //
-// v0.1 keeps sessions in-process. Durable persistence (required for
-// production Orchestrated Process) is v0.2.
+// Sessions are held in memory and, when a sessions directory is configured
+// (UAPF_SESSIONS_DIR, or ./data/sessions by default), mirrored to disk as
+// <sessionId>.json and reloaded on startup — so sessions survive a restart.
+// If the directory is not writable the manager degrades to in-memory only.
 //
 // AuditEmitter: structured logging of CloudEvents v1.0 records.
-// v0.1 emits to console and buffers in the session record. v0.2 plugs in
-// VeriDocs Register for signed durable storage.
+// Emits to console and buffers in the (now durable) session record.
 
+import * as fs from "fs";
+import * as path from "path";
 import { v4 as uuidv4 } from "uuid";
 import fetch from "node-fetch";
 import {
@@ -19,6 +22,75 @@ import {
 
 export class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
+  private persistenceDir?: string;
+
+  // When a sessions directory is configured and writable, every session is
+  // mirrored to <dir>/<sessionId>.json and reloaded on startup, so in-flight
+  // and completed sessions survive a process restart. If the directory cannot
+  // be created the manager degrades cleanly to pure in-memory operation.
+  constructor(opts: { persistenceDir?: string } = {}) {
+    const dir =
+      opts.persistenceDir ??
+      process.env.UAPF_SESSIONS_DIR ??
+      path.join(process.cwd(), "data", "sessions");
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      this.persistenceDir = dir;
+      this.loadAll();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stdout.write(
+        JSON.stringify({
+          sessionPersistence: { disabled: true, dir, reason: msg },
+        }) + "\n"
+      );
+      this.persistenceDir = undefined;
+    }
+  }
+
+  /** Whether durable persistence is active. */
+  isDurable(): boolean {
+    return !!this.persistenceDir;
+  }
+
+  private loadAll(): void {
+    if (!this.persistenceDir) return;
+    let files: string[];
+    try {
+      files = fs
+        .readdirSync(this.persistenceDir)
+        .filter((f) => f.endsWith(".json"));
+    } catch {
+      return;
+    }
+    for (const f of files) {
+      try {
+        const raw = fs.readFileSync(path.join(this.persistenceDir, f), "utf-8");
+        const rec = JSON.parse(raw) as SessionRecord;
+        if (rec && rec.sessionId) this.sessions.set(rec.sessionId, rec);
+      } catch {
+        // skip a corrupt session file rather than failing startup
+      }
+    }
+  }
+
+  private persist(sessionId: string): void {
+    if (!this.persistenceDir) return;
+    const rec = this.sessions.get(sessionId);
+    if (!rec) return;
+    try {
+      fs.writeFileSync(
+        path.join(this.persistenceDir, `${sessionId}.json`),
+        JSON.stringify(rec)
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stdout.write(
+        JSON.stringify({ sessionPersistenceError: { sessionId, error: msg } }) +
+          "\n"
+      );
+    }
+  }
 
   create(args: {
     packageId: string;
@@ -44,6 +116,7 @@ export class SessionManager {
       auditChain: [],
     };
     this.sessions.set(sessionId, record);
+    this.persist(sessionId);
     return record;
   }
 
@@ -57,7 +130,10 @@ export class SessionManager {
 
   setState(sessionId: string, state: SessionState): void {
     const s = this.sessions.get(sessionId);
-    if (s) s.state = state;
+    if (s) {
+      s.state = state;
+      this.persist(sessionId);
+    }
   }
 
   complete(sessionId: string, output: unknown): void {
@@ -66,6 +142,7 @@ export class SessionManager {
       s.state = "completed";
       s.completedAt = new Date().toISOString();
       s.output = output;
+      this.persist(sessionId);
     }
   }
 
@@ -75,6 +152,7 @@ export class SessionManager {
       s.state = "failed";
       s.completedAt = new Date().toISOString();
       s.errorMessage = errorMessage;
+      this.persist(sessionId);
     }
   }
 
@@ -89,12 +167,16 @@ export class SessionManager {
     s.state = "aborted";
     s.completedAt = new Date().toISOString();
     s.errorMessage = reason ? `aborted: ${reason}` : "aborted by host";
+    this.persist(sessionId);
     return true;
   }
 
   appendAudit(sessionId: string, event: AuditEvent): void {
     const s = this.sessions.get(sessionId);
-    if (s) s.auditChain.push(event);
+    if (s) {
+      s.auditChain.push(event);
+      this.persist(sessionId);
+    }
   }
 }
 
