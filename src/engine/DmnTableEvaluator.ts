@@ -1,8 +1,14 @@
 // Minimal DMN decision-table evaluator.
 //
-// Scope (v0.1):
+// Scope (uapf-engine 1.1.0):
 // - Decision tables only (no boxed expressions, no literal expressions, no DRDs)
-// - Hit policies: UNIQUE, FIRST, PRIORITY
+// - Hit policies: UNIQUE, FIRST, PRIORITY, ANY, COLLECT
+//     PRIORITY uses an explicit `priority` attribute on <rule> (lowest number
+//       wins); rules without one keep document order.
+//     ANY requires every matching rule to yield identical output.
+//     COLLECT returns the list of all matching rule outputs, or — when the
+//       table declares `aggregation` (SUM | MIN | MAX | COUNT) on a single
+//       output — the aggregated scalar.
 // - Input expressions: strings ("foo"), numbers (15), booleans (true), dash (-) for any
 // - Comparison operators in input entries: ==, !=, >, >=, <, <=
 // - FEEL intervals [a..b] (a..b) [a..b) etc.; comma-separated value lists
@@ -49,7 +55,8 @@ export interface DmnOutput {
 export interface DmnDecisionTable {
   decisionId: string;
   decisionName: string;
-  hitPolicy: "UNIQUE" | "FIRST" | "PRIORITY" | "ANY";
+  hitPolicy: "UNIQUE" | "FIRST" | "PRIORITY" | "ANY" | "COLLECT";
+  aggregation?: "SUM" | "MIN" | "MAX" | "COUNT"; // COLLECT aggregation
   inputs: DmnInput[];
   outputs: DmnOutput[];
   rules: DmnRule[];
@@ -110,6 +117,8 @@ export class DmnTableEvaluator {
     const rules: DmnRule[] = ((table.rule as Record<string, unknown>[]) || []).map(
       (r) => ({
         id: (r["@_id"] as string) || "",
+        priority:
+          r["@_priority"] !== undefined ? Number(r["@_priority"]) : undefined,
         inputEntries: ((r.inputEntry as Record<string, unknown>[]) || []).map((e) => ({
           text: (e.text as string) ?? "",
         })),
@@ -119,12 +128,18 @@ export class DmnTableEvaluator {
       })
     );
 
+    const aggRaw = (table["@_aggregation"] as string)?.toUpperCase();
+    const aggregation = (["SUM", "MIN", "MAX", "COUNT"].includes(aggRaw || "")
+      ? aggRaw
+      : undefined) as DmnDecisionTable["aggregation"];
+
     return {
       decisionId: (d["@_id"] as string) || "",
       decisionName: (d["@_name"] as string) || "",
       hitPolicy:
         ((table["@_hitPolicy"] as string)?.toUpperCase() as DmnDecisionTable["hitPolicy"]) ||
         "UNIQUE",
+      aggregation,
       inputs,
       outputs,
       rules,
@@ -173,20 +188,50 @@ export class DmnTableEvaluator {
       case "FIRST":
         firedRules = [matchingRules[0]];
         break;
-      case "PRIORITY":
-      case "ANY":
-        // PRIORITY would need rule ordering; v0.1 treats as FIRST
+      case "PRIORITY": {
+        // Lowest `priority` attribute wins; rules without an explicit
+        // priority keep document order (PRIORITY degrades to FIRST when no
+        // priorities are declared). Array.sort is stable in modern V8.
+        const sorted = [...matchingRules].sort(
+          (a, b) =>
+            (a.priority ?? Number.MAX_SAFE_INTEGER) -
+            (b.priority ?? Number.MAX_SAFE_INTEGER)
+        );
+        firedRules = [sorted[0]];
+        break;
+      }
+      case "ANY": {
+        // Every matching rule MUST produce identical output.
+        const outs = matchingRules.map((r) =>
+          JSON.stringify(this.ruleOutput(table, r))
+        );
+        if (new Set(outs).size > 1) {
+          throw new Error(
+            `ANY hit policy violated: rules matched with differing outputs in ${table.decisionId}`
+          );
+        }
         firedRules = [matchingRules[0]];
         break;
-      default:
+      }
+      case "COLLECT":
         firedRules = matchingRules;
+        break;
+      default:
+        firedRules = [matchingRules[0]];
     }
 
-    const result: Record<string, unknown> = {};
-    for (let i = 0; i < table.outputs.length; i++) {
-      const out = table.outputs[i];
-      const key = out.name || out.label || out.id;
-      result[key] = this.parseOutput(firedRules[0].outputEntries[i].text, out.typeRef);
+    let result: unknown;
+    if (table.hitPolicy === "COLLECT") {
+      const rows = firedRules.map((r) => this.ruleOutput(table, r));
+      if (table.aggregation && table.outputs.length === 1) {
+        const key = this.outputKey(table.outputs[0]);
+        const nums = rows.map((row) => Number(row[key]));
+        result = this.aggregate(table.aggregation, nums);
+      } else {
+        result = rows;
+      }
+    } else {
+      result = this.ruleOutput(table, firedRules[0]);
     }
 
     return {
@@ -302,5 +347,34 @@ export class DmnTableEvaluator {
       return parseFloat(literal);
     }
     return literal;
+  }
+
+  private outputKey(o: DmnOutput): string {
+    return o.name || o.label || o.id;
+  }
+
+  private ruleOutput(
+    table: DmnDecisionTable,
+    rule: DmnRule
+  ): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (let i = 0; i < table.outputs.length; i++) {
+      const o = table.outputs[i];
+      const entry = rule.outputEntries[i];
+      out[this.outputKey(o)] = this.parseOutput(entry ? entry.text : "", o.typeRef);
+    }
+    return out;
+  }
+
+  private aggregate(
+    agg: NonNullable<DmnDecisionTable["aggregation"]>,
+    nums: number[]
+  ): number {
+    const valid = nums.filter((n) => !Number.isNaN(n));
+    if (agg === "COUNT") return nums.length;
+    if (agg === "SUM") return valid.reduce((s, n) => s + n, 0);
+    if (agg === "MIN") return valid.length ? Math.min(...valid) : 0;
+    if (agg === "MAX") return valid.length ? Math.max(...valid) : 0;
+    return 0;
   }
 }
