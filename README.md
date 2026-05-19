@@ -4,20 +4,21 @@ Reference execution engine for UAPF packages. Implements the v0.1 [UAPF Integrat
 
 ## What's in here
 
-- Real BPMN process execution (linear sequences, service tasks, business rule tasks). Custom minimal walker for v0.1; pluggable engine interface lets you swap in bpmn-engine or Camunda Zeebe later.
-- Real DMN decision-table evaluation with UNIQUE / FIRST / PRIORITY hit policies and basic comparison operators in input entries.
-- Session lifecycle (create, active, completed, failed) with in-memory persistence for v0.1.
+- Real BPMN process execution: linear sequences, service tasks, business rule tasks, user tasks, and exclusive + parallel gateways. Custom token-based walker; pluggable engine interface lets you swap in bpmn-engine or Camunda Zeebe later.
+- Real DMN decision-table evaluation with UNIQUE / FIRST / PRIORITY / ANY / COLLECT hit policies (COLLECT with SUM / MIN / MAX / COUNT aggregation) and comparison operators / FEEL intervals in input entries.
+- User tasks dispatched to a host `task.*` capability — the host owns the human-interaction lifecycle and returns the decision.
+- Minimal CMMN 1.1 case execution: stages, tasks, milestones, and entry-criterion sentries (planItemOnPart triggers + ifPart conditions). See `CmmnEngine` for the covered subset.
+- L0–L4 cross-package reference resolution: resolves and validates the package reference graph (level ordering, missing references, cycles) via `IUapfRegistry.resolveReferences`.
+- Session lifecycle (create, active, completed, failed, aborted) with durable, disk-backed persistence — sessions survive a restart; degrades to in-memory if no writable directory.
 - Capability matchmaking: validates host manifest against package needs at session start; fails fast if anything is missing.
 - CloudEvents v1.0 audit emission with UAPF-IP extensions; events buffered per session and logged as structured JSON.
 - HTTP callback dispatcher (HostClient) that calls back into hosts via `POST /uapf/host/capability/{namespace}/{operation}`.
 
 ## What this is not yet
 
-- No durable session persistence — restart loses in-flight sessions. v0.2.
-- No user tasks (require host-side human interaction model — pairs with v0.2 task lifecycle).
-- No gateways (exclusive, parallel) — v0.2.
+- CMMN execution covers a documented subset — no full plan-item lifecycle, exit criteria, repetition rules, event listeners or planning tables; and it is not yet wired to a case-session HTTP surface.
 - No DID-VC signing on requests yet — token-based auth placeholder. v0.2.
-- Custom minimal BPMN walker, not full bpmn-engine. Production deployments should swap in via the `IExecutionEngine` interface.
+- Custom minimal BPMN walker, not full bpmn-engine. Production deployments can swap in via the `IExecutionEngine` interface.
 
 ## HTTP API
 
@@ -85,7 +86,13 @@ Or for development:
 npm run dev
 ```
 
-The engine listens on `localhost:4000` by default. Set `PORT`, `UAPF_MODE`, `PACKAGES_DIR`, and `WORKSPACE_DIR` per the documented config.
+The engine listens on `localhost:4000` by default. Set `PORT`, `UAPF_MODE`, `PACKAGES_DIR`, `WORKSPACE_DIR` and `UAPF_SESSIONS_DIR` per the documented config.
+
+Run the test suite (builds, then runs the functional checks):
+
+```bash
+npm test
+```
 
 ## Project layout
 
@@ -97,18 +104,22 @@ uapf-engine/
 │   │   ├── ExecutionEngine.ts        Legacy interface
 │   │   ├── SimpleExecutionEngine.ts  Legacy stub
 │   │   ├── RealExecutionEngine.ts    v0.1 real implementation
-│   │   ├── BpmnWalker.ts             Custom minimal BPMN walker
+│   │   ├── BpmnWalker.ts             Token-based BPMN walker (gateways)
+│   │   ├── ConditionEvaluator.ts     BPMN/CMMN condition evaluation
 │   │   ├── DmnTableEvaluator.ts      DMN decision-table evaluator
+│   │   ├── CmmnEngine.ts             Minimal CMMN 1.1 case executor
 │   │   ├── HostClient.ts             HTTP callback client
-│   │   └── SessionManager.ts         In-memory sessions + audit emitter
+│   │   └── SessionManager.ts         Durable sessions + audit emitter
 │   ├── http/
 │   │   ├── server.ts                 Express bootstrap
 │   │   └── routes.ts                 Endpoints
-│   ├── registry/                     Package loading and validation
+│   ├── registry/                     Package loading, validation,
+│   │                                 L0–L4 reference resolution
 │   ├── types/
 │   │   ├── uapf.ts                   Package types
 │   │   └── uapf-ip.ts                Session, capability, audit types
 │   └── utils/
+├── test/                             Functional test suites
 └── public/                           Dashboard HTML
 ```
 

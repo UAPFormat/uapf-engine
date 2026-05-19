@@ -5,3 +5,6 @@ dist
 *.log
 .env
 .env.*
+
+# runtime session store (durable SessionManager)
+data/

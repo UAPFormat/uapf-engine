@@ -1,13 +1,14 @@
 {
   "name": "uapf-engine",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Reference execution engine for UAPF packages (HTTP API)",
   "main": "index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/http/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/http/server.js",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "test": "npm run build && node test/gateways.test.js && node test/dmn.test.js && node test/usertask.test.js && node test/sessions.test.js && node test/references.test.js && node test/cmmn.test.js"
   },
   "keywords": [],
   "author": "",

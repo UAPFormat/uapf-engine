@@ -1,3 +1,5 @@
+import type { ReferenceResolutionResult } from "./ReferenceResolver";
+
 export type RegistryMode = "packages" | "workspace";
 
 export type ArtifactKind = "manifest" | "bpmn" | "dmn" | "cmmn" | "docs" | "tests";
@@ -65,4 +67,9 @@ export interface IUapfRegistry {
     packageId?: string;
     filename?: string;
   }): Promise<{ filename: string; packageId: string; version?: string }>;
+  /**
+   * Resolve the L0-L4 cross-package reference graph rooted at a package,
+   * validating level ordering and detecting missing references / cycles.
+   */
+  resolveReferences?(packageId: string): Promise<ReferenceResolutionResult>;
 }
