@@ -13,6 +13,11 @@ import { LoadedPackage, UapfLoader } from "./UapfLoader";
 import { UapfValidator } from "./UapfValidator";
 import { WORKSPACE_INDEX_FILENAMES } from "../config";
 import { logger } from "../utils/logger";
+import {
+  ReferenceResolver,
+  ReferenceResolutionResult,
+  extractReferences,
+} from "./ReferenceResolver";
 
 const RESOURCE_FILES = ["resources.json", "resources.yaml", "resources.yml"];
 
@@ -212,6 +217,26 @@ export class WorkspaceRegistry implements IUapfRegistry {
       artifact.mediaType || (kind === "manifest" ? "application/json" : "application/xml");
     const content = await fs.promises.readFile(artifact.path);
     return { mediaType, content };
+  }
+
+  // Resolve the L0-L4 cross-package reference graph rooted at a package.
+  // References are read from each loaded package's manifest; the resolver
+  // validates level ordering and reports missing references and cycles.
+  async resolveReferences(packageId: string): Promise<ReferenceResolutionResult> {
+    const resolver = new ReferenceResolver((id) => {
+      const p = this.packages.get(id);
+      if (!p) return undefined;
+      const level =
+        typeof p.manifest?.level === "number" ? p.manifest.level : undefined;
+      return {
+        packageId: p.packageId,
+        level,
+        references: extractReferences(p.manifest).map((r) =>
+          r.version ? `${r.packageId}@${r.version}` : r.packageId
+        ),
+      };
+    });
+    return resolver.resolve(packageId);
   }
 
   async resolveResources(req: ResolveResourcesRequest): Promise<ResourceBindingResult> {
