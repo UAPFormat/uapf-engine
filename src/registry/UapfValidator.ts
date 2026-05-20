@@ -3,6 +3,7 @@ import path from "path";
 import Ajv, { type ErrorObject } from "ajv";
 import addFormats from "ajv-formats";
 import { LoadedPackage } from "./UapfLoader";
+import { BpmnWalker } from "../engine/BpmnWalker";
 
 export interface ValidationIssue {
   level: "error" | "warn";
@@ -28,6 +29,8 @@ export class UapfValidator {
     this.loadValidators();
   }
 
+  private algorithmCardValidator?: SchemaValidator;
+
   private loadValidators() {
     if (!this.schemasDir) {
       this.startupWarnings.push({
@@ -40,6 +43,7 @@ export class UapfValidator {
     this.manifestValidator = this.loadSchema("manifest.schema.json");
     this.policiesValidator = this.loadSchema("policies.schema.json");
     this.resourceBindingValidator = this.loadSchema("resource-binding.schema.json");
+    this.algorithmCardValidator = this.loadSchema("algorithm-card.schema.json");
   }
 
   private loadSchema(fileName: string): SchemaValidator | undefined {
@@ -129,6 +133,71 @@ export class UapfValidator {
     issues.push(...this.validateManifest(pkg.manifest));
     issues.push(...this.validatePolicies(pkg.policies));
     issues.push(...this.validateResourceBindings(pkg.resources));
+    issues.push(...this.validateAlgorithmCards(pkg));
+    issues.push(...this.validateAlgorithmCardRefs(pkg));
+    return issues;
+  }
+
+  // v2.4.0: validate each algorithm card against algorithm-card.schema.json.
+  validateAlgorithmCards(pkg: LoadedPackage): ValidationIssue[] {
+    const cards = pkg.algorithmCards;
+    if (!cards) return [];
+    if (!this.algorithmCardValidator) return [...this.startupWarnings];
+    const issues: ValidationIssue[] = [];
+    for (const [id, card] of Object.entries(cards)) {
+      const valid = this.algorithmCardValidator(card);
+      if (!valid) {
+        issues.push(
+          ...UapfValidator.formatErrors(this.algorithmCardValidator, `algorithms/${id}`)
+        );
+      }
+    }
+    return issues;
+  }
+
+  // SEM-012 (v2.4.0): every BPMN task with uapf:algorithmCardRef MUST resolve
+  // to a loaded algorithm card. Reads the bpmn artifacts from the loaded
+  // package, walks each task, and reports unresolved refs as ERRORs.
+  validateAlgorithmCardRefs(pkg: LoadedPackage): ValidationIssue[] {
+    const issues: ValidationIssue[] = [];
+    if (!pkg.artifacts) return issues;
+    const cards = pkg.algorithmCards || {};
+    const bpmnArtifacts = pkg.artifacts.filter((a) => a.kind === "bpmn");
+    if (bpmnArtifacts.length === 0) return issues;
+
+    const walker = new BpmnWalker();
+    for (const art of bpmnArtifacts) {
+      let xml: string;
+      try {
+        xml = fs.readFileSync(art.path, "utf-8");
+      } catch (err) {
+        issues.push({
+          level: "warn",
+          message: `Could not read BPMN artifact ${art.id}: ${(err as Error).message}`,
+          path: art.path,
+        });
+        continue;
+      }
+      let processes: ReturnType<BpmnWalker["parseBpmnXml"]>;
+      try {
+        processes = walker.parseBpmnXml(xml);
+      } catch (err) {
+        // Don't double-report XML parse errors here — other code paths cover that.
+        continue;
+      }
+      for (const proc of processes) {
+        for (const node of proc.nodes.values()) {
+          if (!node.algorithmCardRef) continue;
+          if (!cards[node.algorithmCardRef]) {
+            issues.push({
+              level: "error",
+              message: `SEM-012: BPMN task ${proc.id}/${node.id} carries uapf:algorithmCardRef="${node.algorithmCardRef}" but no algorithm card with that id is loaded`,
+              path: art.path,
+            });
+          }
+        }
+      }
+    }
     return issues;
   }
 

@@ -8,6 +8,7 @@ import {
   ArtifactRef,
   RegistryMode,
 } from "./IUapfRegistry";
+import { AlgorithmCard } from "../types/uapf";
 import { ARTIFACT_CACHE_DIR } from "../config";
 
 export interface LoadedPackage {
@@ -19,6 +20,7 @@ export interface LoadedPackage {
   policies?: any;
   resources?: any;
   guardrails?: any;            // G7: parsed resources/guardrails.* if present
+  algorithmCards?: Record<string, AlgorithmCard>;  // v2.4.0: cards keyed by id
   warnings: string[];
   sourceMode?: RegistryMode;
 }
@@ -50,6 +52,10 @@ function mediaTypeForPath(kind: ArtifactKind, filePath: string): string {
   if (kind === "docs") {
     if (filePath.toLowerCase().endsWith(".md")) return "text/markdown";
     return "text/plain";
+  }
+  if (kind === "algorithm-card") {
+    if (filePath.toLowerCase().endsWith(".json")) return "application/json";
+    return "application/yaml";
   }
   return "application/json";
 }
@@ -222,6 +228,7 @@ export class UapfLoader {
     let policies: any = undefined;
     let resources: any = undefined;
     let guardrails: any = undefined; // G7
+    let algorithmCards: Record<string, AlgorithmCard> | undefined = undefined; // v2.4.0
 
     for (const entry of entries) {
       if (entry.isDirectory) continue;
@@ -260,6 +267,11 @@ export class UapfLoader {
         if (lowerName.startsWith(`cmmn${path.sep}`)) return "cmmn";
         if (lowerName.startsWith(`docs${path.sep}`)) return "docs";
         if (lowerName.startsWith(`tests${path.sep}`)) return "tests";
+        // v2.4.0: algorithm cards under algorithms/*.card.{yaml,yml,json}
+        if (lowerName.startsWith(`algorithms${path.sep}`) &&
+            (lowerName.endsWith(".card.yaml") || lowerName.endsWith(".card.yml") || lowerName.endsWith(".card.json"))) {
+          return "algorithm-card";
+        }
         if (RESOURCE_FILES.some((name) => lowerName.endsWith(name))) return "docs";
         if (POLICY_FILES.some((name) => lowerName.endsWith(name))) return "docs";
         return null;
@@ -291,6 +303,23 @@ export class UapfLoader {
           warnings.push(`Failed to parse policies: ${(err as Error).message}`);
         }
         continue;
+      }
+
+      if (kind === "algorithm-card") {
+        try {
+          const parsed = lowerName.endsWith(".card.json")
+            ? readJsonBuffer(entry.getData())
+            : readYamlBuffer(entry.getData());
+          if (parsed && typeof parsed === "object" && (parsed as any).id) {
+            algorithmCards = algorithmCards || {};
+            algorithmCards[(parsed as any).id as string] = parsed as AlgorithmCard;
+          } else {
+            warnings.push(`Algorithm card without id: ${lowerName}`);
+          }
+        } catch (err) {
+          warnings.push(`Failed to parse algorithm card ${lowerName}: ${(err as Error).message}`);
+        }
+        // continue past — also add to artifacts list so /artifacts/algorithm-card listing works.
       }
 
       if (kind === "manifest") {
@@ -325,6 +354,7 @@ export class UapfLoader {
       resources,
       policies,
       guardrails,
+      algorithmCards,
       warnings,
     };
   }

@@ -43,7 +43,7 @@ export function createRoutes(
   router.get("/uapf/packages/:packageId/artifacts/:kind", async (req, res) => {
     const { packageId, kind } = req.params;
     const { id } = req.query;
-    const allowedKinds = ["manifest", "bpmn", "dmn", "cmmn", "docs", "tests"];
+    const allowedKinds = ["manifest", "bpmn", "dmn", "cmmn", "docs", "tests", "algorithm-card"];
     if (!allowedKinds.includes(kind)) {
       res.status(400).json({ error: "invalid_artifact_kind" });
       return;
@@ -59,6 +59,41 @@ export function createRoutes(
     }
     res.contentType(artifact.mediaType);
     res.send(artifact.content);
+  });
+
+  // v2.4.0 Algorithm Cards: list + get
+  router.get("/uapf/packages/:packageId/algorithms", async (req, res) => {
+    const { packageId } = req.params;
+    const pkg = await registry.getPackage(packageId);
+    if (!pkg) {
+      res.status(404).json({ error: "package_not_found" });
+      return;
+    }
+    const cards = pkg.algorithmCards || {};
+    const summaries = Object.values(cards).map((c) => ({
+      id: c.id,
+      name: c.name,
+      version: c.version,
+      algorithm_kind: c.algorithm_kind,
+      determinism: c.determinism,
+      risk: c.risk,
+    }));
+    res.json({ packageId: pkg.packageId, count: summaries.length, algorithms: summaries });
+  });
+
+  router.get("/uapf/packages/:packageId/algorithms/:cardId", async (req, res) => {
+    const { packageId, cardId } = req.params;
+    const pkg = await registry.getPackage(packageId);
+    if (!pkg) {
+      res.status(404).json({ error: "package_not_found" });
+      return;
+    }
+    const card = pkg.algorithmCards?.[cardId];
+    if (!card) {
+      res.status(404).json({ error: "algorithm_card_not_found" });
+      return;
+    }
+    res.json(card);
   });
 
   // Legacy stateless endpoints

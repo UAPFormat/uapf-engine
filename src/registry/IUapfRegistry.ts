@@ -1,8 +1,9 @@
+import { AlgorithmCard } from "../types/uapf";
 import type { ReferenceResolutionResult } from "./ReferenceResolver";
 
 export type RegistryMode = "packages" | "workspace";
 
-export type ArtifactKind = "manifest" | "bpmn" | "dmn" | "cmmn" | "docs" | "tests";
+export type ArtifactKind = "manifest" | "bpmn" | "dmn" | "cmmn" | "docs" | "tests" | "algorithm-card";
 
 export interface ArtifactRef {
   kind: ArtifactKind;
@@ -23,6 +24,7 @@ export interface PackageSummary {
   artifacts?: ArtifactRef[];
   requiredClaims?: string[];
   guardrails?: Record<string, unknown>;  // G7: package guardrails snapshot
+  algorithmCards?: Record<string, AlgorithmCard>;  // v2.4.0: cards keyed by id
   source: { mode: RegistryMode; location: string };
 }
 

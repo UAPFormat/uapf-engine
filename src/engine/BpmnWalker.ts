@@ -34,9 +34,10 @@ export interface BpmnNode {
   id: string;
   name?: string;
   type: BpmnNodeType;
-  capability?: string; // uapf:capability attribute
-  decision?: string; // uapf:decision attribute
+  capability?: string; // uapf:capability attribute (engine ns)
+  decision?: string; // uapf:decision attribute (engine ns)
   schemaRef?: string; // uapf:schemaRef attribute (task I/O contract)
+  algorithmCardRef?: string; // v2.4.0: uapf:algorithmCardRef attribute (governance ns, prefix-agnostic)
   default?: string; // gateway default sequence-flow id
 }
 
@@ -138,6 +139,7 @@ export class BpmnWalker {
           capability: (it["@_capability"] as string) || undefined,
           decision: (it["@_decision"] as string) || undefined,
           schemaRef: (it["@_schemaRef"] as string) || undefined,
+          algorithmCardRef: (it["@_algorithmCardRef"] as string) || undefined,
           default: (it["@_default"] as string) || undefined,
         });
       }

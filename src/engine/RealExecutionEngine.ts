@@ -187,12 +187,30 @@ export class RealExecutionEngine implements IExecutionEngine {
         }
         const cap = parseCapabilityRef(node.capability);
 
+        // v2.4.0: if the task carries uapf:algorithmCardRef, attach a compact
+        // summary of the resolved card to invoking/invoked audit events so
+        // downstream observers (OpenDMS, audit consumers) see which algorithm
+        // ran without joining tables.
+        const cardRef = node.algorithmCardRef;
+        const card = cardRef ? pkg.algorithmCards?.[cardRef] : undefined;
+        const algorithmCard = card
+          ? {
+              id: card.id,
+              version: card.version,
+              algorithm_kind: card.algorithm_kind,
+              determinism: card.determinism,
+              risk: card.risk,
+            }
+          : cardRef
+          ? { id: cardRef, resolved: false }
+          : undefined;
+
         this.audit.emit({
           sessionId: session.sessionId,
           packageId: pkg.packageId,
           stepId: node.id,
           type: "dev.uapf.capability.invoking",
-          data: { capability: formatCapabilityRef(cap), nodeName: node.name },
+          data: { capability: formatCapabilityRef(cap), nodeName: node.name, algorithmCard },
         });
 
         const result = await hostClient.invoke({
@@ -209,7 +227,7 @@ export class RealExecutionEngine implements IExecutionEngine {
           packageId: pkg.packageId,
           stepId: node.id,
           type: "dev.uapf.capability.invoked",
-          data: { capability: formatCapabilityRef(cap), output: result.output },
+          data: { capability: formatCapabilityRef(cap), output: result.output, algorithmCard },
         });
 
         // Merge capability output into variables
