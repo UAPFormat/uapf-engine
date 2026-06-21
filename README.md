@@ -126,3 +126,11 @@ uapf-engine/
 ## License
 
 MIT.
+
+## Sponsor UAPF
+
+UAPF is an open, vendor-neutral standard — MIT-licensed and maintained in the open.
+If your work relies on portable process definitions or AI-agent execution via MCP,
+sponsorship keeps the engine, MCP server, and examples maintained and the spec moving.
+
+[![Sponsor UAPFormat](https://img.shields.io/badge/Sponsor-UAPFormat-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/UAPFormat)
