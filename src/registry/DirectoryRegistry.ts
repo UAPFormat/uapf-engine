@@ -140,6 +140,8 @@ export class DirectoryRegistry implements IUapfRegistry {
     sourceUrl: string;
     packageId?: string;
     filename?: string;
+    /** Gitea/ProcessGit access token, sent as "Authorization: token <value>". */
+    authToken?: string;
   }): Promise<{ filename: string; packageId: string; version?: string }> {
     if (!opts.sourceUrl) {
       throw new Error("installFromUrl: sourceUrl is required");
@@ -150,7 +152,10 @@ export class DirectoryRegistry implements IUapfRegistry {
 
     // Download the bytes
     logger.info(`installFromUrl: fetching ${opts.sourceUrl}`);
-    const res = await fetch(opts.sourceUrl);
+    const res = await fetch(
+      opts.sourceUrl,
+      opts.authToken ? { headers: { Authorization: `token ${opts.authToken}` } } : undefined
+    );
     if (!res.ok) {
       throw new Error(`installFromUrl: HTTP ${res.status} fetching ${opts.sourceUrl}`);
     }

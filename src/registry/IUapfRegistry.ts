@@ -66,6 +66,8 @@ export interface IUapfRegistry {
     sourceUrl: string;
     packageId?: string;
     filename?: string;
+    /** Gitea/ProcessGit access token, sent as "Authorization: token <value>". */
+    authToken?: string;
   }): Promise<{ filename: string; packageId: string; version?: string }>;
   /**
    * Resolve the L0-L4 cross-package reference graph rooted at a package,
