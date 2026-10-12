@@ -19,6 +19,7 @@ export interface LoadedPackage {
   policies?: any;
   resources?: any;
   guardrails?: any;            // G7: parsed resources/guardrails.* if present
+  mappings?: any;              // parsed resources/mappings.* (kind: uapf.resources.mapping)
   warnings: string[];
   sourceMode?: RegistryMode;
 }
@@ -32,6 +33,13 @@ const GUARDRAILS_FILES = [
   "resources/guardrails.yaml",
   "resources/guardrails.yml",
   "resources/guardrails.json",
+];
+// Task -> executor bindings (kind: uapf.resources.mapping). ProcessGit keeps
+// these beside the BPMN so the diagram stays free of runtime attributes.
+const MAPPING_FILES = [
+  "resources/mappings.yaml",
+  "resources/mappings.yml",
+  "resources/mappings.json",
 ];
 
 function sanitizeEntryName(entryName: string): string {
@@ -222,6 +230,7 @@ export class UapfLoader {
     let policies: any = undefined;
     let resources: any = undefined;
     let guardrails: any = undefined; // G7
+    let mappings: any = undefined;
 
     for (const entry of entries) {
       if (entry.isDirectory) continue;
@@ -249,6 +258,17 @@ export class UapfLoader {
           warnings.push(
             `Failed to parse guardrails: ${(err as Error).message}`
           );
+        }
+        continue;
+      }
+
+      if (MAPPING_FILES.includes(posixLower)) {
+        try {
+          mappings = posixLower.endsWith(".json")
+            ? readJsonBuffer(entry.getData())
+            : readYamlBuffer(entry.getData());
+        } catch (err) {
+          warnings.push(`Failed to parse mappings: ${(err as Error).message}`);
         }
         continue;
       }
@@ -325,6 +345,7 @@ export class UapfLoader {
       resources,
       policies,
       guardrails,
+      mappings,
       warnings,
     };
   }

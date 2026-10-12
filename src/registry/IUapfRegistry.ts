@@ -23,6 +23,7 @@ export interface PackageSummary {
   artifacts?: ArtifactRef[];
   requiredClaims?: string[];
   guardrails?: Record<string, unknown>;  // G7: package guardrails snapshot
+  mappings?: Record<string, unknown>;    // resources/mappings.* task bindings
   source: { mode: RegistryMode; location: string };
 }
 

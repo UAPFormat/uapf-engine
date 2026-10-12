@@ -5,7 +5,10 @@
 // - Exclusive gateways: condition-routed branching, with a default flow
 // - Parallel gateways: fork (emit all outgoing) + join (wait for all incoming)
 // - Service tasks use the `uapf:capability` attribute (host capability id)
-// - Business rule tasks use the `uapf:decision` attribute (DMN decision id)
+// - Business rule tasks use the `uapf:decision` attribute (DMN decision id),
+//   or an <extensionElements><uapf:decisionRef ref="..."/> child
+// - Tasks without attributes are bound through resources/mappings.yaml
+//   (see MappingResolver)
 // - User tasks are dispatched to an optional `onUserTask` handler
 // - Abstract `task` nodes are pass-through (no execution semantics)
 //
@@ -66,6 +69,17 @@ export interface StepHandler {
 export interface BpmnExecutionResult {
   variables: Record<string, unknown>;
   trace: Array<{ nodeId: string; nodeName?: string; type: BpmnNodeType }>;
+  /** Set when a user task is waiting for a human; resume from nodeId. */
+  suspended?: { nodeId: string; pending: string[] };
+}
+
+/** A user-task handler returns this key (true) to park the token and suspend. */
+export const SUSPEND_MARKER = "__uapfSuspend";
+
+export interface ResumeFrom {
+  nodeId: string;                       // the user task that was waiting
+  output: Record<string, unknown>;      // the human's result
+  pending?: string[];                   // other tokens parked at suspension
 }
 
 const MAX_STEPS = 10_000;
@@ -77,6 +91,20 @@ function extractText(v: unknown): string | undefined {
   if (typeof v === "object") {
     const t = (v as Record<string, unknown>)["#text"];
     if (t !== undefined) return String(t);
+  }
+  return undefined;
+}
+
+// <extensionElements><uapf:decisionRef ref="X"/></extensionElements>
+// (namespace prefixes are removed by the parser).
+function decisionRefOf(it: Record<string, unknown>): string | undefined {
+  const ext = it["extensionElements"] as Record<string, unknown> | undefined;
+  if (!ext || typeof ext !== "object") return undefined;
+  const ref = ext["decisionRef"];
+  const first = Array.isArray(ref) ? ref[0] : ref;
+  if (first && typeof first === "object") {
+    const v = (first as Record<string, unknown>)["@_ref"];
+    return typeof v === "string" && v ? v : undefined;
   }
   return undefined;
 }
@@ -136,7 +164,7 @@ export class BpmnWalker {
           name: (it["@_name"] as string) || undefined,
           type,
           capability: (it["@_capability"] as string) || undefined,
-          decision: (it["@_decision"] as string) || undefined,
+          decision: (it["@_decision"] as string) || decisionRefOf(it),
           schemaRef: (it["@_schemaRef"] as string) || undefined,
           default: (it["@_default"] as string) || undefined,
         });
@@ -177,8 +205,10 @@ export class BpmnWalker {
   async execute(
     process: BpmnProcess,
     initialVars: Record<string, unknown>,
-    handler: StepHandler
+    handler: StepHandler,
+    resume?: ResumeFrom
   ): Promise<BpmnExecutionResult> {
+    if (resume) return this.run(process, initialVars, handler, resume);
     let start: BpmnNode | undefined;
     for (const n of process.nodes.values()) {
       if (n.type === "startEvent") {
@@ -189,13 +219,35 @@ export class BpmnWalker {
     if (!start) {
       throw new Error(`No startEvent found in process ${process.id}`);
     }
+    return this.run(process, initialVars, handler, undefined, start);
+  }
 
+  private async run(
+    process: BpmnProcess,
+    initialVars: Record<string, unknown>,
+    handler: StepHandler,
+    resume?: ResumeFrom,
+    start?: BpmnNode
+  ): Promise<BpmnExecutionResult> {
     const variables: Record<string, unknown> = { ...initialVars };
     const trace: BpmnExecutionResult["trace"] = [];
 
     // Token worklist. Each token is a node awaiting processing. Processed
     // one at a time; parallel fork/join semantics via join-arrival counts.
-    const worklist: BpmnNode[] = [start];
+    // (Join counts are not carried across a suspension.)
+    const worklist: BpmnNode[] = [];
+    if (resume) {
+      const waiting = process.nodes.get(resume.nodeId);
+      if (!waiting) throw new Error(`Resume node ${resume.nodeId} not in process ${process.id}`);
+      Object.assign(variables, resume.output);
+      worklist.push(...this.followSingle(process, waiting));
+      for (const id of resume.pending ?? []) {
+        const n = process.nodes.get(id);
+        if (n) worklist.push(n);
+      }
+    } else if (start) {
+      worklist.push(start);
+    }
     const joinArrivals = new Map<string, number>();
     let steps = 0;
 
@@ -230,7 +282,17 @@ export class BpmnWalker {
               `User task ${current.id} encountered but no userTask handler configured`
             );
           }
-          Object.assign(variables, await handler.onUserTask(current, variables));
+          const out = await handler.onUserTask(current, variables);
+          if (out && out[SUSPEND_MARKER] === true) {
+            const { [SUSPEND_MARKER]: _m, ...rest } = out;
+            Object.assign(variables, rest);
+            return {
+              variables,
+              trace,
+              suspended: { nodeId: current.id, pending: worklist.map((n) => n.id) },
+            };
+          }
+          Object.assign(variables, out);
           next = this.followSingle(process, current);
           break;
         }

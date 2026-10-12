@@ -180,6 +180,30 @@ export function createRoutes(
     res.json(session.auditChain);
   });
 
+  // Continue a session suspended on a user task with the human's result.
+  router.post("/uapf/sessions/:sessionId/resume", async (req, res) => {
+    if (!(engine instanceof RealExecutionEngine) || !sessions) {
+      res.status(501).json({ error: "session_surface_not_wired" });
+      return;
+    }
+    const session = sessions.get(req.params.sessionId);
+    if (!session) {
+      res.status(404).json({ error: "session_not_found" });
+      return;
+    }
+    if (session.state !== "suspended") {
+      res.status(409).json({ error: "session_not_suspended", state: session.state });
+      return;
+    }
+    try {
+      const output = (req.body && typeof req.body.output === "object" && req.body.output) || {};
+      res.json(await engine.resumeSession(req.params.sessionId, output));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "resume failed";
+      res.status(400).json({ error: message });
+    }
+  });
+
   // UAPF-IP v0.1 — abort a running session (G2)
   router.post("/uapf/sessions/:sessionId/abort", (req, res) => {
     if (!sessions) {

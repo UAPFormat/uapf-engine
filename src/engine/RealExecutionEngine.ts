@@ -20,7 +20,7 @@ import {
   EvaluateDecisionResult,
 } from "./ExecutionEngine";
 import { IUapfRegistry, PackageSummary } from "../registry/IUapfRegistry";
-import { BpmnWalker, BpmnNode, StepHandler } from "./BpmnWalker";
+import { BpmnWalker, BpmnNode, BpmnProcess, StepHandler, ResumeFrom, SUSPEND_MARKER } from "./BpmnWalker";
 import { DmnTableEvaluator } from "./DmnTableEvaluator";
 import { HostClient } from "./HostClient";
 import { SessionManager, AuditEmitter } from "./SessionManager";
@@ -29,9 +29,11 @@ import {
   StartSessionResponse,
   HostManifest,
   CapabilityRef,
+  SessionRecord,
   parseCapabilityRef,
   formatCapabilityRef,
 } from "../types/uapf-ip";
+import { resolveBinding, ResolvedBinding } from "./MappingResolver";
 
 export class RealExecutionEngine implements IExecutionEngine {
   private readonly walker = new BpmnWalker();
@@ -150,23 +152,84 @@ export class RealExecutionEngine implements IExecutionEngine {
 
     this.sessions.setState(session.sessionId, "active");
 
-    // Load BPMN, find process, walk it
-    const bpmnDoc = await this.registry.getArtifact(pkg.packageId, "bpmn", req.processId);
-    if (!bpmnDoc) {
-      this.sessions.fail(session.sessionId, `BPMN artifact for process ${req.processId} not found`);
-      throw new Error(`BPMN artifact for process ${req.processId} not found`);
+    const { proc, handler } = await this.prepareRun(session, pkg, req.processId);
+    return this.drive(session, pkg, proc, handler, (req.input ?? {}) as Record<string, unknown>);
+  }
+
+  /** Continue a session that is waiting on a user task (state "suspended"). */
+  async resumeSession(
+    sessionId: string,
+    output: Record<string, unknown>
+  ): Promise<StartSessionResponse> {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error(`Unknown session: ${sessionId}`);
+    if (session.state !== "suspended" || !session.suspension) {
+      throw new Error(`Session ${sessionId} is not waiting (state '${session.state}')`);
     }
-    const bpmnXml = bpmnDoc.content.toString("utf-8");
-    const processes = this.walker.parseBpmnXml(bpmnXml);
+    const pkg = await this.registry.getPackage(session.packageId);
+    if (!pkg) throw new Error(`Unknown packageId: ${session.packageId}`);
+    const susp = session.suspension;
+    this.audit.emit({
+      sessionId,
+      packageId: pkg.packageId,
+      stepId: susp.nodeId,
+      type: "dev.uapf.usertask.completed",
+      data: { output, resumed: true },
+    });
+    this.sessions.setState(sessionId, "active");
+    const { proc, handler } = await this.prepareRun(session, pkg, session.processId);
+    return this.drive(session, pkg, proc, handler, susp.variables, {
+      nodeId: susp.nodeId,
+      output: output ?? {},
+      pending: susp.pending,
+    });
+  }
+
+  private async prepareRun(
+    session: SessionRecord,
+    pkg: PackageSummary,
+    processId: string
+  ): Promise<{ proc: BpmnProcess; handler: StepHandler }> {
+    // Load BPMN, find process, walk it
+    // The process id may be the BPMN file name or the <process id> inside it.
+    let processes: ReturnType<BpmnWalker["parseBpmnXml"]> = [];
+    const bpmnDoc = await this.registry.getArtifact(pkg.packageId, "bpmn", processId);
+    if (bpmnDoc) {
+      processes = this.walker.parseBpmnXml(bpmnDoc.content.toString("utf-8"));
+    } else {
+      for (const a of (pkg.artifacts ?? []).filter((x) => x.kind === "bpmn")) {
+        const doc = await this.registry.getArtifact(pkg.packageId, "bpmn", a.id);
+        if (!doc) continue;
+        const parsed = this.walker.parseBpmnXml(doc.content.toString("utf-8"));
+        if (parsed.some((p) => p.id === processId)) {
+          processes = parsed;
+          break;
+        }
+      }
+    }
+    if (processes.length === 0) {
+      this.sessions.fail(session.sessionId, `BPMN artifact for process ${processId} not found`);
+      throw new Error(`BPMN artifact for process ${processId} not found`);
+    }
     const proc =
-      processes.find((p) => p.id === req.processId) ?? processes[0];
+      processes.find((p) => p.id === processId) ?? processes[0];
     if (!proc) {
-      this.sessions.fail(session.sessionId, `No process found in BPMN for ${req.processId}`);
-      throw new Error(`No process found in BPMN for ${req.processId}`);
+      this.sessions.fail(session.sessionId, `No process found in BPMN for ${processId}`);
+      throw new Error(`No process found in BPMN for ${processId}`);
     }
 
+    const mappings = (pkg as { mappings?: unknown }).mappings;
+    const bindingFor = (taskId: string): ResolvedBinding | undefined =>
+      resolveBinding(mappings, taskId);
+    const bindingAudit = (b: ResolvedBinding | undefined, fromAttribute: boolean) =>
+      fromAttribute
+        ? { boundBy: "bpmn-attribute" }
+        : b
+          ? { boundBy: "resources/mappings", targetId: b.targetId, targetType: b.targetType, mode: b.mode }
+          : {};
+
     const hostClient = new HostClient({
-      hostBaseUrl: req.hostManifest.hostBaseUrl,
+      hostBaseUrl: session.hostManifest.hostBaseUrl,
     });
 
     const handler: StepHandler = {
@@ -174,7 +237,7 @@ export class RealExecutionEngine implements IExecutionEngine {
         this.audit.emit({
           sessionId: session.sessionId,
           packageId: pkg.packageId,
-          packageVersion: req.packageVersion,
+          packageVersion: session.packageVersion,
           stepId: node.id,
           type: "dev.uapf.step.entered",
           data: { nodeName: node.name, nodeType: node.type },
@@ -182,17 +245,25 @@ export class RealExecutionEngine implements IExecutionEngine {
       },
 
       onServiceTask: async (node: BpmnNode, vars) => {
-        if (!node.capability) {
-          throw new Error(`Service task ${node.id} has no uapf:capability binding`);
+        const binding = bindingFor(node.id);
+        const capRef = node.capability ?? binding?.capability;
+        if (!capRef) {
+          throw new Error(
+            `Service task ${node.id} has no binding (no uapf:capability attribute and no entry in resources/mappings.yaml)`
+          );
         }
-        const cap = parseCapabilityRef(node.capability);
+        const cap = parseCapabilityRef(capRef);
 
         this.audit.emit({
           sessionId: session.sessionId,
           packageId: pkg.packageId,
           stepId: node.id,
           type: "dev.uapf.capability.invoking",
-          data: { capability: formatCapabilityRef(cap), nodeName: node.name },
+          data: {
+            capability: formatCapabilityRef(cap),
+            nodeName: node.name,
+            ...bindingAudit(binding, !!node.capability),
+          },
         });
 
         const result = await hostClient.invoke({
@@ -223,11 +294,25 @@ export class RealExecutionEngine implements IExecutionEngine {
         if (!node.decision) {
           throw new Error(`Business rule task ${node.id} has no uapf:decision binding`);
         }
+        // The decision id may be the DMN file name or the <decision id> inside it.
+        let tables: ReturnType<typeof this.dmn.parseDmnXml> = [];
         const dmnDoc = await this.registry.getArtifact(pkg.packageId, "dmn", node.decision);
-        if (!dmnDoc) {
+        if (dmnDoc) {
+          tables = this.dmn.parseDmnXml(dmnDoc.content.toString("utf-8"));
+        } else {
+          for (const a of (pkg.artifacts ?? []).filter((x) => x.kind === "dmn")) {
+            const doc = await this.registry.getArtifact(pkg.packageId, "dmn", a.id);
+            if (!doc) continue;
+            const parsed = this.dmn.parseDmnXml(doc.content.toString("utf-8"));
+            if (parsed.some((t) => t.decisionId === node.decision)) {
+              tables = parsed;
+              break;
+            }
+          }
+        }
+        if (tables.length === 0) {
           throw new Error(`DMN artifact for decision ${node.decision} not found`);
         }
-        const tables = this.dmn.parseDmnXml(dmnDoc.content.toString("utf-8"));
         const table =
           tables.find((t) => t.decisionId === node.decision) ??
           tables.find((t) => t.decisionName === node.decision) ??
@@ -257,8 +342,12 @@ export class RealExecutionEngine implements IExecutionEngine {
         // namespace for exactly this (Orchestrated Process profile). The
         // node MAY name an explicit capability via uapf:capability; if it
         // does not, task.request@1 is the default.
-        const cap: CapabilityRef = node.capability
-          ? parseCapabilityRef(node.capability)
+        const binding = bindingFor(node.id);
+        const capRef =
+          node.capability ??
+          (binding?.capability?.startsWith("task.") ? binding.capability : undefined);
+        const cap: CapabilityRef = capRef
+          ? parseCapabilityRef(capRef)
           : { namespace: "task", operation: "request", version: 1 };
 
         this.audit.emit({
@@ -266,7 +355,11 @@ export class RealExecutionEngine implements IExecutionEngine {
           packageId: pkg.packageId,
           stepId: node.id,
           type: "dev.uapf.usertask.dispatched",
-          data: { capability: formatCapabilityRef(cap), nodeName: node.name },
+          data: {
+            capability: formatCapabilityRef(cap),
+            nodeName: node.name,
+            ...bindingAudit(binding, !!node.capability),
+          },
         });
 
         const result = await hostClient.invoke({
@@ -277,6 +370,21 @@ export class RealExecutionEngine implements IExecutionEngine {
           guardrails: session.guardrails,
           schemaRef: node.schemaRef,
         });
+
+        // The host may accept the task and answer later: { status: "pending" }.
+        // The session is then suspended and continued via resumeSession().
+        const out = result.output as Record<string, unknown> | undefined;
+        if (out && typeof out === "object" && out.status === "pending") {
+          this.audit.emit({
+            sessionId: session.sessionId,
+            packageId: pkg.packageId,
+            stepId: node.id,
+            type: "dev.uapf.usertask.waiting",
+            data: { capability: formatCapabilityRef(cap), output: out },
+          });
+          const { status: _status, ...rest } = out;
+          return { ...rest, [SUSPEND_MARKER]: true };
+        }
 
         this.audit.emit({
           sessionId: session.sessionId,
@@ -293,12 +401,39 @@ export class RealExecutionEngine implements IExecutionEngine {
       },
     };
 
+    return { proc, handler };
+  }
+
+  private async drive(
+    session: SessionRecord,
+    pkg: PackageSummary,
+    proc: BpmnProcess,
+    handler: StepHandler,
+    vars: Record<string, unknown>,
+    resume?: ResumeFrom
+  ): Promise<StartSessionResponse> {
     try {
-      const execResult = await this.walker.execute(
-        proc,
-        (req.input ?? {}) as Record<string, unknown>,
-        handler
-      );
+      const execResult = await this.walker.execute(proc, vars, handler, resume);
+      if (execResult.suspended) {
+        this.sessions.suspend(session.sessionId, {
+          nodeId: execResult.suspended.nodeId,
+          pending: execResult.suspended.pending,
+          variables: execResult.variables,
+        });
+        this.audit.emit({
+          sessionId: session.sessionId,
+          packageId: pkg.packageId,
+          stepId: execResult.suspended.nodeId,
+          type: "dev.uapf.session.suspended",
+          data: { waitingFor: execResult.suspended.nodeId, trace: execResult.trace },
+        });
+        return {
+          sessionId: session.sessionId,
+          state: "suspended",
+          output: execResult.variables,
+          waitingFor: execResult.suspended.nodeId,
+        };
+      }
       this.sessions.complete(session.sessionId, execResult.variables);
       this.audit.emit({
         sessionId: session.sessionId,

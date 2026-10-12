@@ -259,6 +259,12 @@ export class DmnTableEvaluator {
     const trimmed = String(entry).trim();
     if (trimmed === "-" || trimmed === "") return true; // wildcard
 
+    // FEEL negation: not("a","b") matches anything outside the list.
+    const notMatch = trimmed.match(/^not\s*\((.*)\)$/s);
+    if (notMatch) {
+      return !this.matchEntry(notMatch[1], value, typeRef);
+    }
+
     // FEEL interval / range: [a..b], (a..b), [a..b), ]a..b[ etc.
     // '[' is an inclusive endpoint; '(' and ']' (outward-facing) are exclusive.
     const rangeMatch = trimmed.match(

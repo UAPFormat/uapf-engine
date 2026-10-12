@@ -142,6 +142,20 @@ export class SessionManager {
       s.state = "completed";
       s.completedAt = new Date().toISOString();
       s.output = output;
+      s.suspension = undefined;
+      this.persist(sessionId);
+    }
+  }
+
+  suspend(
+    sessionId: string,
+    at: { nodeId: string; pending: string[]; variables: Record<string, unknown> }
+  ): void {
+    const s = this.sessions.get(sessionId);
+    if (s) {
+      s.state = "suspended";
+      s.suspension = { ...at, since: new Date().toISOString() };
+      s.output = at.variables;
       this.persist(sessionId);
     }
   }

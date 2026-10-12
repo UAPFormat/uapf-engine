@@ -28,6 +28,12 @@ export function evaluateCondition(
   }
   if (e === "") return true;
 
+  // a || b  and  a && b (&& binds tighter). Quotes are respected.
+  const ors = splitTopLevel(e, "||");
+  if (ors.length > 1) return ors.some((part) => evaluateCondition(part, vars));
+  const ands = splitTopLevel(e, "&&");
+  if (ands.length > 1) return ands.every((part) => evaluateCondition(part, vars));
+
   const m = OP_RE.exec(e);
   if (!m) {
     // Bare variable reference -> truthiness.
@@ -104,4 +110,32 @@ function isTruthy(v: unknown): boolean {
   if (typeof v === "number") return v !== 0;
   if (typeof v === "string") return v !== "" && v.toLowerCase() !== "false";
   return true;
+}
+
+function splitTopLevel(expr: string, sep: "||" | "&&"): string[] {
+  const parts: string[] = [];
+  let quote: string | null = null;
+  let buf = "";
+  for (let i = 0; i < expr.length; i++) {
+    const ch = expr[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      buf += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      buf += ch;
+      continue;
+    }
+    if (expr.startsWith(sep, i)) {
+      parts.push(buf.trim());
+      buf = "";
+      i += sep.length - 1;
+      continue;
+    }
+    buf += ch;
+  }
+  parts.push(buf.trim());
+  return parts.filter((p) => p !== "");
 }

@@ -76,6 +76,8 @@ function summarize(pkg: LoadedPackage, mode: RegistryMode): PackageSummary {
     })),
     artifacts: pkg.artifacts,
     requiredClaims: manifest.policies?.requiredClaims || pkg.policies?.requiredClaims,
+    guardrails: pkg.guardrails,
+    mappings: pkg.mappings,
     source: { mode, location: pkg.sourcePath },
   };
 }

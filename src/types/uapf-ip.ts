@@ -54,6 +54,13 @@ export interface SessionRecord {
   output?: unknown;
   errorMessage?: string;
   auditChain: AuditEvent[];
+  /** Present while state is "suspended": where to continue and with what. */
+  suspension?: {
+    nodeId: string;
+    pending: string[];
+    variables: Record<string, unknown>;
+    since: string;
+  };
 }
 
 export interface StartSessionRequest {
@@ -70,6 +77,7 @@ export interface StartSessionResponse {
   state: SessionState;
   auditChainRoot?: string;
   output?: unknown;          // present if process completed synchronously
+  waitingFor?: string;       // user task id when state is "suspended"
 }
 
 // CloudEvents v1.0 envelope with UAPF-IP extension attributes
