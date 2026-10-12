@@ -236,13 +236,13 @@ export function createRoutes(
       res.status(501).json({ error: "install_not_supported_in_this_registry_mode" });
       return;
     }
-    const { sourceUrl, packageId, filename } = req.body || {};
+    const { sourceUrl, packageId, filename, authToken } = req.body || {};
     if (!sourceUrl || typeof sourceUrl !== "string") {
       res.status(400).json({ error: "sourceUrl_required" });
       return;
     }
     try {
-      const result = await registry.installFromUrl({ sourceUrl, packageId, filename });
+      const result = await registry.installFromUrl({ sourceUrl, packageId, filename, authToken });
       res.json({ installed: true, ...result });
     } catch (err) {
       res.status(500).json({ error: "install_failed", detail: (err as Error).message });
