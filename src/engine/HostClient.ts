@@ -27,6 +27,7 @@ export class HostClient {
       input: invocation.input,
       guardrails: invocation.guardrails,
       schemaRef: invocation.schemaRef,
+      target: invocation.target,
     };
     const headers: Record<string, string> = {
       "Content-Type": "application/json",

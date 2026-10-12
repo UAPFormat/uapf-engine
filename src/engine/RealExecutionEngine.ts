@@ -273,6 +273,7 @@ export class RealExecutionEngine implements IExecutionEngine {
           input: vars,
           guardrails: session.guardrails,
           schemaRef: node.schemaRef ?? binding?.schemaRef,
+          target: binding ? { id: binding.targetId, type: binding.targetType, name: binding.targetName } : undefined,
         });
 
         this.audit.emit({
@@ -332,6 +333,16 @@ export class RealExecutionEngine implements IExecutionEngine {
           },
         });
 
+        // COLLECT returns a list of rows; expose it as lists per output column
+        // ({ element: ["a", "b"] }) so the next steps can read it by name.
+        if (Array.isArray(result.result)) {
+          const rows = result.result as Array<Record<string, unknown>>;
+          const cols: Record<string, unknown[]> = {};
+          for (const row of rows) {
+            for (const [k, v] of Object.entries(row ?? {})) (cols[k] ??= []).push(v);
+          }
+          return Object.keys(cols).length ? cols : { [node.decision as string]: [] };
+        }
         return (result.result ?? {}) as Record<string, unknown>;
       },
 
@@ -369,6 +380,7 @@ export class RealExecutionEngine implements IExecutionEngine {
           input: vars,
           guardrails: session.guardrails,
           schemaRef: node.schemaRef ?? binding?.schemaRef,
+          target: binding ? { id: binding.targetId, type: binding.targetType, name: binding.targetName } : undefined,
         });
 
         // The host may accept the task and answer later: { status: "pending" }.

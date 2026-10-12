@@ -108,6 +108,8 @@ export interface CapabilityInvocation {
   input: unknown;
   guardrails?: Record<string, unknown>;
   schemaRef?: string;   // uapf:schemaRef of the invoking BPMN task (I/O contract)
+  /** The executor the package bound this task to (resources/mappings.yaml). */
+  target?: { id: string; type?: string; name?: string };
 }
 
 export interface CapabilityResult {
