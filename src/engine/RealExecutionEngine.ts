@@ -219,8 +219,10 @@ export class RealExecutionEngine implements IExecutionEngine {
     }
 
     const mappings = (pkg as { mappings?: unknown }).mappings;
-    const bindingFor = (taskId: string): ResolvedBinding | undefined =>
-      resolveBinding(mappings, taskId);
+    // A BPMN attribute already names the capability: the mapping then only
+    // adds context (target, mode), so an ambiguous target is not an error.
+    const bindingFor = (taskId: string, needCapability = true): ResolvedBinding | undefined =>
+      resolveBinding(mappings, taskId, { needCapability });
     const bindingAudit = (b: ResolvedBinding | undefined, fromAttribute: boolean) =>
       fromAttribute
         ? { boundBy: "bpmn-attribute" }
@@ -245,7 +247,7 @@ export class RealExecutionEngine implements IExecutionEngine {
       },
 
       onServiceTask: async (node: BpmnNode, vars) => {
-        const binding = bindingFor(node.id);
+        const binding = bindingFor(node.id, !node.capability);
         const capRef = node.capability ?? binding?.capability;
         if (!capRef) {
           throw new Error(
@@ -353,7 +355,7 @@ export class RealExecutionEngine implements IExecutionEngine {
         // namespace for exactly this (Orchestrated Process profile). The
         // node MAY name an explicit capability via uapf:capability; if it
         // does not, task.request@1 is the default.
-        const binding = bindingFor(node.id);
+        const binding = bindingFor(node.id, false);
         const capRef =
           node.capability ??
           (binding?.capability?.startsWith("task.") ? binding.capability : undefined);

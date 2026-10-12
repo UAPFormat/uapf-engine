@@ -138,6 +138,13 @@ function registryFor(loaded) {
   }
   check("a target with several capabilities needs an explicit capability", /add "capability:"/.test(ambiguous));
   check(
+    "an ambiguous target is fine when the BPMN attribute names the capability",
+    resolveBinding(
+      { targets: [{ id: "t", capabilities: ["capability.a.b", "capability.c.d"] }], bindings: [{ source: { ref: "X" }, targetId: "t" }] },
+      "X", { needCapability: false }
+    ).targetId === "t"
+  );
+  check(
     "a target with one capability resolves without naming it",
     resolveBinding({ targets: [{ id: "t", capabilities: ["capability.event.emit"] }], bindings: [{ source: { ref: "E" }, targetId: "t" }] }, "E").capability === "event.emit@1"
   );
