@@ -9,6 +9,7 @@
 //     - source: { type: bpmn.serviceTask, ref: RegisterDocument }
 //       targetId: system.opendms-document-api
 //       capability: capability.document.fetch   # needed when the target has several
+//       schemaRef: ...                           # optional output contract for the host
 //       mode: autonomous
 //
 // A BPMN attribute (uapf:capability) still wins over the mapping, so older
@@ -29,6 +30,8 @@ export interface ResolvedBinding {
   mode?: string;
   /** Capability reference in engine form, e.g. "document.fetch@1". */
   capability?: string;
+  /** Output contract the host should apply (same role as uapf:schemaRef). */
+  schemaRef?: string;
 }
 
 /** "capability.document.fetch" | "document.fetch" | "document.fetch@1+" -> "document.fetch@1" */
@@ -59,6 +62,7 @@ export function resolveBinding(
     targetType: target?.type,
     targetName: target?.name,
     mode: b.mode,
+    schemaRef: typeof b.schemaRef === "string" ? b.schemaRef : undefined,
   };
 
   const caps = (target?.capabilities ?? []).map(toEngineCapability);
